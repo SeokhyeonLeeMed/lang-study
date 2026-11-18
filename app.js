@@ -222,7 +222,72 @@
         '<span class="lang-meta">Day ' + ds.length + "개 · 끝낸 날 " + full + (nw ? " · 오답 " + nw : "") + "</span>" +
         '<span class="bar"><i style="width:' + (ds.length ? Math.round(full / ds.length * 100) : 0) + '%"></i></span></a>';
     });
-    $app.innerHTML = h + "</div>";
+    $app.innerHTML = h + "</div>" +
+      '<section class="device"><h2>이 기기</h2><div class="dv-row" id="pushRow"></div>' +
+      '<div class="dv-row"><div class="dv-title">기록 옮기기</div><p class="sub">홈 화면 앱을 지웠다 다시 추가하면 기록이 사라집니다. 지우기 전에 복사해 두었다가 새 앱에서 붙여 넣으십시오.</p>' +
+      '<div class="row-actions"><button type="button" class="btn sm ghost" id="recCopy">기록 복사</button><button type="button" class="btn sm ghost" id="recPaste">기록 붙여넣기</button></div></div></section>';
+    pushUI();
+    document.getElementById("recCopy").onclick = function () {
+      copyText("외국어공부기록 " + JSON.stringify({ prog: PROG, wrong: WRONG, set: SET })).then(function (ok) { alert(ok ? "기록을 복사했습니다. 새 앱에서 '기록 붙여넣기'를 누르십시오." : "복사하지 못했습니다."); });
+    };
+    document.getElementById("recPaste").onclick = function () {
+      var t = prompt("복사해 둔 기록을 붙여 넣어 주십시오.");
+      if (!t) return;
+      var d; try { d = JSON.parse(t.slice(t.indexOf("{"))); } catch (e) { d = null; }
+      if (!d || typeof d.prog !== "object") { alert("기록 형식이 아닙니다."); return; }
+      if (!confirm("지금 이 기기의 기록을 붙여 넣은 기록으로 바꿀까요?")) return;
+      save("fl_prog", d.prog || {}); save("fl_wrong", d.wrong || {}); if (d.set) save("fl_set", d.set);
+      location.reload();
+    };
+  }
+
+  // ---------- 매일 알림 (홈 화면 앱) ----------
+  // 켜면 이 기기의 구독 정보(연결 글)가 생긴다. 그 글을 저장소 secrets(PUSH_SUBS)에 넣어야 GitHub Actions가 매일 보낸다.
+  var PUSH_KEY = "BKGoDJ-MhE2Hg8w-ktyEPvRyIrKcK-2ppzZbYrkeqJgg1jbzwKrYLCiqdOlyUR-qP21qq5PoLOtkTyXPTTGs3Sc";
+  var STANDALONE = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var SWREG = ("serviceWorker" in navigator && /^https?:$/.test(location.protocol))
+    ? navigator.serviceWorker.register("sw.js").catch(function () { return null; }) : null;
+  function b64uBytes(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+  function fallbackCopy(t) {
+    var ta = document.createElement("textarea"); ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
+    var ok = false; try { ok = document.execCommand("copy"); } catch (e) {} ta.remove(); return ok;
+  }
+  function copyText(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { return true; }, function () { return fallbackCopy(t); });
+    return Promise.resolve(fallbackCopy(t));
+  }
+  function subText(sub) { return "외국어공부알림 " + JSON.stringify(sub.toJSON ? sub.toJSON() : sub); }
+  function pushUI() {
+    var el = document.getElementById("pushRow"); if (!el) return;
+    function put(h) { el.innerHTML = '<div class="dv-title">매일 알림</div>' + h; }
+    if (!SWREG || !("PushManager" in window) || !("Notification" in window)) {
+      put('<p class="sub">' + (location.protocol === "file:" ? "공개 사이트에서만 켤 수 있습니다." : IOS && !STANDALONE ? "홈 화면에 추가한 앱으로 열면 켤 수 있습니다." : "이 브라우저에서는 알림을 쓸 수 없습니다.") + "</p>");
+      return;
+    }
+    put('<p class="sub">확인하는 중…</p>');
+    SWREG.then(function (reg) {
+      if (!reg) { put('<p class="sub">알림을 준비하지 못했습니다.</p>'); return; }
+      return reg.pushManager.getSubscription().then(function (sub) {
+        if (Notification.permission === "denied") {
+          put('<p class="sub">알림이 막혀 있습니다. 설정 → 알림 → 외국어에서 허용해 주십시오.</p>');
+        } else if (sub && Notification.permission === "granted") {
+          put('<p class="sub">켜져 있습니다. 매일 저녁 8시 무렵에 옵니다. 처음 켰다면 연결 글을 복사해서 Claude에게 보내 주십시오.</p>' +
+            '<div class="row-actions"><button type="button" class="btn sm" id="subCopy">연결 글 복사</button><button type="button" class="btn sm ghost" id="subOff">끄기</button></div>');
+          document.getElementById("subCopy").onclick = function () { copyText(subText(sub)).then(function (ok) { alert(ok ? "복사했습니다. Claude에게 붙여 넣어 보내 주십시오." : "복사하지 못했습니다."); }); };
+          document.getElementById("subOff").onclick = function () { if (confirm("매일 알림을 끌까요?")) sub.unsubscribe().then(pushUI, pushUI); };
+        } else {
+          put('<p class="sub">매일 저녁 공부할 시간을 알려 드립니다.</p><div class="row-actions"><button type="button" class="btn sm" id="subOn">알림 켜기</button></div>');
+          document.getElementById("subOn").onclick = function () {
+            Notification.requestPermission().then(function (p) {
+              if (p !== "granted") return pushUI();
+              return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(PUSH_KEY) }).then(pushUI);
+            }).catch(function (e) { put('<p class="sub">켜지 못했습니다: ' + esc(String(e && e.message || e)) + "</p>"); });
+          };
+        }
+      });
+    });
   }
 
   // ---------- 언어 화면 ----------

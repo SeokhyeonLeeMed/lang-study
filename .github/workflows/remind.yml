@@ -1,0 +1,22 @@
+name: daily-reminder
+# 매일 알림: 한국 시각 19:47에 예약(GitHub 예약 실행은 보통 몇~수십 분 늦는다 → 대개 저녁 8시 무렵 도착)
+# secrets: VAPID_JWK(개인 키), PUSH_SUBS(구독 JSON 배열). 구독이 없어지면 실패로 끝나 메일이 온다.
+on:
+  schedule:
+    - cron: "47 10 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+      - run: node .github/push.mjs
+        env:
+          VAPID_JWK: ${{ secrets.VAPID_JWK }}
+          PUSH_SUBS: ${{ secrets.PUSH_SUBS }}
