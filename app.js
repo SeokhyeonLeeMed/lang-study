@@ -169,10 +169,10 @@
     }
     h += '<button type="button" class="chip" id="speedBtn" title="음성 빠르기">' + SET.speed + "×</button>";
     if (SY.cfg) h += '<span class="chip sync" id="syncChip" hidden></span>';
-    if (window.FL_LOGOUT) h += '<button type="button" class="chip" id="lockBtn" title="이 기기에서 비밀번호 잊기">잠그기</button>';
+    if (window.FL_LOGOUT) h += '<button type="button" class="chip" id="lockBtn" title="이 기기에서 로그아웃">로그아웃</button>';
     box.innerHTML = h;
     var sc = document.getElementById("syncChip"); if (sc) chipSync(sc);
-    var lb = document.getElementById("lockBtn"); if (lb) lb.onclick = function () { if (confirm("이 기기에 저장된 열쇠를 지우고 잠글까요?")) window.FL_LOGOUT(); };
+    var lb = document.getElementById("lockBtn"); if (lb) lb.onclick = function () { if (confirm("로그아웃할까요? 기록은 서버에 남습니다.")) (SYMETA.dirty ? syncPush() : Promise.resolve()).then(function () { window.FL_LOGOUT(); }); };
     var hb = document.getElementById("helperBtn");
     if (hb) hb.onclick = function () { var L = LBY[ROUTE.lang]; SET.helper[L.id] = (SET.helper[L.id] + 1) % L.helper.modes.length; saveSet(); rerender(); };
     document.getElementById("speedBtn").onclick = function () { var sp = [1, 0.85, 0.7]; SET.speed = sp[(sp.indexOf(SET.speed) + 1) % sp.length]; saveSet(); AU.playbackRate = SET.speed; topControls(); };
@@ -231,10 +231,10 @@
   }
 
   // ---------- 기록 저장 (서버) ----------
-  // 공개판에서만 켜진다(boot.js가 d.bin 안의 설정으로 window.FL_SYNC를 만든다). 퀴즈 사이트와 같은 Supabase 계정으로 로그인하고,
+  // 공개판에서만 켜진다. boot.js가 로그인한 Supabase 세션(FL_SB·FL_USER)과 설정(FL_SYNC)을 넘긴다.
   // user_files(본인만 읽고 쓰는 표)의 한 줄(path)에 {prog, wrong, upd}를 둔다. ver로 동시 저장을 막는다.
   // 이 기기의 localStorage는 사본(오프라인일 때·불러오기 전)일 뿐이고, 서버가 원본이다.
-  var SY = { cfg: window.FL_SYNC || null, sb: null, user: null, ver: null, st: "off", last: 0, timer: null, busy: false, again: false, err: "" };
+  var SY = { cfg: window.FL_SYNC || null, sb: window.FL_SB || null, user: window.FL_USER || null, ver: null, st: "off", last: 0, timer: null, busy: false, again: false, err: "" };
   var SYMETA = load("fl_sync", {});   // { uid: 마지막으로 맞춘 계정, dirty: 서버에 아직 안 올린 변경이 있음, t: 그 변경 시각 }
   function syncState(s, err) { SY.st = s; SY.err = err || ""; var c = document.getElementById("syncChip"); if (c) chipSync(c); syncUI(); }
   function chipSync(c) {
@@ -248,29 +248,14 @@
     if (!SY.user) return;
     clearTimeout(SY.timer); SY.timer = setTimeout(syncPush, 1500);
   }
-  function syncLoadLib() {
-    if (window.supabase) return Promise.resolve();
-    return new Promise(function (res, rej) {
-      var s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js";
-      s.onload = res; s.onerror = function () { rej(new Error("연결 프로그램을 불러오지 못했습니다")); }; document.head.appendChild(s);
-    });
-  }
   function syncInit() {
-    if (!SY.cfg) return;
-    syncState("loading");
-    syncLoadLib().then(function () {
-      SY.sb = window.supabase.createClient(SY.cfg.url, SY.cfg.anonKey, { auth: { persistSession: true, storageKey: "fl-sb-auth", autoRefreshToken: true } });
-      return SY.sb.auth.getSession();
-    }).then(function (r) {
-      SY.user = r.data && r.data.session ? r.data.session.user : null;
-      if (SY.user) return syncPull(); syncState("out");
-    }).catch(function (e) { syncState(SY.user ? "error" : "out", e.message); });
+    if (!SY.cfg || !SY.user) return;
+    syncPull();
     document.addEventListener("visibilitychange", function () {
-      if (!SY.user) return;
       if (document.visibilityState === "hidden") { if (SYMETA.dirty) { clearTimeout(SY.timer); syncPush(); } }
       else if (!SY.busy) syncPull();   // 다른 기기에서 공부한 것 받아 오기
     });
-    window.addEventListener("online", function () { if (SY.user) syncPull(); });
+    window.addEventListener("online", function () { syncPull(); });
   }
   // 두 기록 합치기: 공부 표시·테스트 점수는 합집합(같은 칸이면 늦게 한 쪽), 오답 노트는 최근에 바꾼 쪽을 바탕으로 다른 쪽에만 있는 단어를 더한다
   function syncMerge(loc, rem, locNewer) {
@@ -336,52 +321,43 @@
   function syncUI() {
     var el = document.getElementById("syncRow"); if (!el) return;
     var h = '<div class="dv-title">기록 저장</div>';
-    if (!SY.cfg) { el.innerHTML = h + '<p class="sub">공개 사이트에서만 서버에 저장됩니다. 지금은 이 브라우저에만 남습니다.</p>'; return; }
-    if (SY.st === "out") {
-      el.innerHTML = h + '<p class="sub">로그인하면 기록이 서버에 저장되어 어느 기기에서나 이어집니다. 의대 퀴즈 사이트의 ID와 비밀번호를 씁니다. 기록은 본인만 볼 수 있습니다.</p>' +
-        '<form class="sync-login" id="syncForm"><input id="syId" autocomplete="username" autocapitalize="none" placeholder="ID" required>' +
-        '<input id="syPw" type="password" autocomplete="current-password" placeholder="비밀번호" required><button class="btn sm" type="submit">로그인</button></form>' +
-        (SY.err ? '<p class="err">' + esc(SY.err) + "</p>" : "");
-      document.getElementById("syncForm").onsubmit = function (e) {
-        e.preventDefault();
-        var id = document.getElementById("syId").value.trim().toLowerCase(), pw = document.getElementById("syPw").value;
-        this.querySelector("button").disabled = true;
-        SY.sb.auth.signInWithPassword({ email: id + "@" + SY.cfg.idDomain, password: pw }).then(function (r) {
-          if (r.error) throw r.error;
-          SY.user = r.data.user; return syncPull();
-        }).catch(function (er) { syncState("out", /invalid login/i.test(er.message) ? "ID 또는 비밀번호가 맞지 않습니다." : er.message); });
-      };
-      return;
-    }
+    if (!SY.cfg || !SY.user) { el.innerHTML = h + '<p class="sub">공개 사이트에서만 서버에 저장됩니다. 지금은 이 브라우저에만 남습니다.</p>'; return; }
     var id = SY.user && SY.user.email ? SY.user.email.split("@")[0] : "";
     var msg = { loading: "불러오는 중…", saving: "저장 중…", saved: "저장됨 " + hhmm(SY.last), error: "저장하지 못했습니다. 연결되면 다시 저장합니다." }[SY.st] || "";
     el.innerHTML = h + '<p class="sub">' + (id ? esc(id) + " 계정에 저장합니다. " : "") + esc(msg) + "</p>" +
       (SY.user ? '<div class="row-actions"><button type="button" class="btn sm ghost" id="syNow">지금 불러오기</button><button type="button" class="btn sm ghost" id="syOut">로그아웃</button></div>' : "");
-    var n = document.getElementById("syNow"); if (n) n.onclick = function () { (SYMETA.dirty ? syncPush() : syncPull()); };
     var o = document.getElementById("syOut"); if (o) o.onclick = function () {
-      if (!confirm("로그아웃할까요? 이 기기의 기록은 서버에 저장된 그대로 남습니다.")) return;
-      (SYMETA.dirty ? syncPush() : Promise.resolve()).then(function () { return SY.sb.auth.signOut(); }).then(function () { SY.user = null; SY.ver = null; syncState("out"); });
+      if (!confirm("로그아웃할까요? 기록은 서버에 남습니다.")) return;
+      (SYMETA.dirty ? syncPush() : Promise.resolve()).then(function () { window.FL_LOGOUT(); });
     };
+    var n = document.getElementById("syNow"); if (n) n.onclick = function () { (SYMETA.dirty ? syncPush() : syncPull()); };
   }
 
   // ---------- 매일 알림 (홈 화면 앱) ----------
-  // 켜면 이 기기의 구독 정보(연결 글)가 생긴다. 그 글을 저장소 secrets(PUSH_SUBS)에 넣어야 GitHub Actions가 매일 보낸다.
+  // 켜면 이 기기의 구독 정보를 서버(user_files의 pushPath 줄)에 넣는다. GitHub Actions(remind.yml)가 매일 그 목록으로 보낸다.
   var PUSH_KEY = "BKGoDJ-MhE2Hg8w-ktyEPvRyIrKcK-2ppzZbYrkeqJgg1jbzwKrYLCiqdOlyUR-qP21qq5PoLOtkTyXPTTGs3Sc";
   var STANDALONE = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
   var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   var SWREG = ("serviceWorker" in navigator && /^https?:$/.test(location.protocol))
     ? navigator.serviceWorker.register("sw.js").catch(function () { return null; }) : null;
   function b64uBytes(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
-  function fallbackCopy(t) {
-    var ta = document.createElement("textarea"); ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
-    var ok = false; try { ok = document.execCommand("copy"); } catch (e) {} ta.remove(); return ok;
+  // 서버의 구독 목록에 이 기기를 넣거나(remove=false) 뺀다. 이미 맞으면 아무것도 하지 않는다
+  function pushSave(sub, remove) {
+    if (!SY.user || !SY.cfg || !SY.cfg.pushPath) return Promise.reject(new Error("로그인 필요"));
+    var j = sub.toJSON ? sub.toJSON() : sub, P = SY.cfg.pushPath;
+    return SY.sb.from("user_files").select("data,ver").eq("user_id", SY.user.id).eq("path", P).maybeSingle().then(function (r) {
+      if (r.error) throw r.error;
+      var list = (r.data && r.data.data && r.data.data.subs) || [];
+      var had = list.some(function (x) { return x.endpoint === j.endpoint; });
+      if (remove ? !had : had) return;
+      list = list.filter(function (x) { return x.endpoint !== j.endpoint; });
+      if (!remove) list.push({ endpoint: j.endpoint, keys: j.keys, ua: navigator.userAgent.slice(0, 140), t: Date.now() });
+      var q = r.data
+        ? SY.sb.from("user_files").update({ data: { subs: list }, ver: r.data.ver + 1 }).eq("user_id", SY.user.id).eq("path", P).eq("ver", r.data.ver)
+        : SY.sb.from("user_files").insert({ user_id: SY.user.id, path: P, data: { subs: list }, ver: 1 });
+      return q.then(function (w) { if (w.error) throw w.error; });
+    });
   }
-  function copyText(t) {
-    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { return true; }, function () { return fallbackCopy(t); });
-    return Promise.resolve(fallbackCopy(t));
-  }
-  function subText(sub) { return "외국어공부알림 " + JSON.stringify(sub.toJSON ? sub.toJSON() : sub); }
   function pushUI() {
     var el = document.getElementById("pushRow"); if (!el) return;
     function put(h) { el.innerHTML = '<div class="dv-title">매일 알림</div>' + h; }
@@ -396,10 +372,13 @@
         if (Notification.permission === "denied") {
           put('<p class="sub">알림이 막혀 있습니다. 설정 → 알림 → 외국어에서 허용해 주십시오.</p>');
         } else if (sub && Notification.permission === "granted") {
-          put('<p class="sub">켜져 있습니다. 매일 저녁 8시 무렵에 옵니다. 처음 켰다면 연결 글을 복사해서 Claude에게 보내 주십시오.</p>' +
-            '<div class="row-actions"><button type="button" class="btn sm" id="subCopy">연결 글 복사</button><button type="button" class="btn sm ghost" id="subOff">끄기</button></div>');
-          document.getElementById("subCopy").onclick = function () { copyText(subText(sub)).then(function (ok) { alert(ok ? "복사했습니다. Claude에게 붙여 넣어 보내 주십시오." : "복사하지 못했습니다."); }); };
-          document.getElementById("subOff").onclick = function () { if (confirm("매일 알림을 끌까요?")) sub.unsubscribe().then(pushUI, pushUI); };
+          put('<p class="sub" id="pushMsg">켜져 있습니다. 매일 저녁 8시 무렵에 옵니다.</p>' +
+            '<div class="row-actions"><button type="button" class="btn sm ghost" id="subOff">끄기</button></div>');
+          pushSave(sub).catch(function () { var m = document.getElementById("pushMsg"); if (m) m.textContent = "켜져 있지만 서버에 등록하지 못했습니다. 연결되면 이 화면을 다시 열어 주십시오."; });
+          document.getElementById("subOff").onclick = function () {
+            if (!confirm("매일 알림을 끌까요?")) return;
+            pushSave(sub, true).catch(function () {}).then(function () { return sub.unsubscribe(); }).then(pushUI, pushUI);
+          };
         } else {
           put('<p class="sub">매일 저녁 공부할 시간을 알려 드립니다.</p><div class="row-actions"><button type="button" class="btn sm" id="subOn">알림 켜기</button></div>');
           document.getElementById("subOn").onclick = function () {
