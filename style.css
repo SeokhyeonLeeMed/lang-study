@@ -261,6 +261,22 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 80px; }
 .sync-login input { min-width: 0; font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
 @media (max-width: 480px) { .sync-login { grid-template-columns: 1fr; } }
 .device .err { color: var(--bad); margin: 6px 0 0; }
+.check-card { border-style: dashed; border-color: var(--accent); background: var(--accent-soft); }
+.check-card .day-no { color: var(--accent); }
+.ck-last { margin-top: 18px; }
+.ck-last h3 { font-size: 16px; margin: 0 0 8px; }
+.ck-sum { text-align: left; margin: 14px 0 6px; }
+.ck-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ck-t th { text-align: left; font-weight: 500; padding: 5px 8px 5px 0; white-space: nowrap; }
+.ck-t td { padding: 5px 8px 5px 0; white-space: nowrap; color: var(--ink-2); }
+.ck-t td.ck-bar { width: 100%; }
+.ck-bar i { display: block; height: 8px; border-radius: 4px; background: var(--ok); min-width: 2px; }
+.ck-sum h4 { font-size: 14px; margin: 14px 0 6px; }
+.ck-g { list-style: none; padding: 0; margin: 0; font-size: 14px; display: grid; gap: 4px; }
+.ck-g li { display: flex; gap: 8px; align-items: baseline; }
+.ck-g .ck-m { font-weight: 700; width: 1.2em; flex: none; }
+.ck-g li.ok .ck-m { color: var(--ok); }
+.ck-g li.no .ck-m { color: var(--bad); }
 .lock h1, .lock > .sub { text-align: center; }
 .lock input[type=password] { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
 .lock .btn { justify-content: center; }

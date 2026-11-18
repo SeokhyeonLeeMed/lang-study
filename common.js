@@ -136,6 +136,7 @@
 
   // ---- 중국어 병음: 경성 단어는 사전에 넣는다 ----
   var ZH_CUSTOM = {
+    "有点儿": "yǒu diǎnr", "点儿": "diǎnr", "说得": "shuō de", "只想": "zhǐ xiǎng",
     "谢谢": "xiè xie", "朋友": "péng you", "东西": "dōng xi", "学生": "xué sheng", "先生": "xiān sheng", "喜欢": "xǐ huan",
     "名字": "míng zi", "衣服": "yī fu", "时候": "shí hou", "认识": "rèn shi", "知道": "zhī dao", "告诉": "gào su",
     "地方": "dì fang", "客气": "kè qi", "漂亮": "piào liang", "舒服": "shū fu", "明白": "míng bai", "意思": "yì si",

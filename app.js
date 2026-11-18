@@ -17,7 +17,7 @@
   function saveSet() { save("fl_set", SET); }
   var PROG = load("fl_prog", {});
   function prog(lang, day) { var k = lang + "-" + day; return PROG[k] || (PROG[k] = {}); }
-  function saveProg() { save("fl_prog", PROG); syncDirty(); }
+  function saveProg() { save("fl_prog", PROG); syncDirty(); nextUpSave(); }
   var WRONG = load("fl_wrong", {});
   function wrongOf(lang) { return WRONG[lang] || (WRONG[lang] = {}); }
   function saveWrong() { save("fl_wrong", WRONG); syncDirty(); }
@@ -195,16 +195,19 @@
     var p = location.hash.replace(/^#\/?/, "").split("/");
     ROUTE.lang = LBY[p[0]] ? p[0] : null;
     ROUTE.day = ROUTE.lang && p[1] && /^\d+$/.test(p[1]) ? +p[1] : null;
+    ROUTE.check = !!(ROUTE.lang && p[1] === "check");
     ROUTE.tab = ROUTE.day ? (TABS.some(function (t) { return t[0] === p[2]; }) ? p[2] : "words") : null;
     var sy = window.scrollY;
     document.body.setAttribute("data-lang", ROUTE.lang || "");
     topControls();
     if (!ROUTE.lang) viewHome();
     else if (p[1] === "wrong") viewWrong(ROUTE.lang);
+    else if (ROUTE.check) viewCheck(ROUTE.lang, +p[2]);
     else if (!ROUTE.day) viewLang(ROUTE.lang);
     else viewDay(ROUTE.lang, ROUTE.day, ROUTE.tab);
     if (keepScroll) window.scrollTo(0, sy); else window.scrollTo(0, 0);
     keepScroll = false;
+    nextUpSave();
   }
 
   // ---------- 첫 화면 ----------
@@ -277,7 +280,8 @@
     var changed = JSON.stringify(doc.prog) !== JSON.stringify(PROG) || JSON.stringify(doc.wrong) !== JSON.stringify(WRONG);
     PROG = doc.prog || {}; WRONG = doc.wrong || {};
     save("fl_prog", PROG); save("fl_wrong", WRONG);
-    if (changed && !ROUTE.day) rerender();   // Day 화면(테스트 중일 수 있음)은 건드리지 않는다
+    if (changed && !ROUTE.day && !ROUTE.check) rerender();   // Day·종합 점검 화면(테스트 중일 수 있음)은 건드리지 않는다
+    nextUpSave();
   }
   function syncPull() {
     if (!SY.user) return Promise.resolve();
@@ -407,6 +411,7 @@
       }).join("");
       h += '<a class="day-card" href="#/' + lang + "/" + d.day + '"><div class="day-head"><span class="day-no">Day ' + d.day + '</span><span class="day-title">' + K(d.title, lang, 0) + "</span></div>" +
         (d.theme ? '<div class="day-theme">' + K(d.theme, lang, 0) + "</div>" : "") + '<div class="pills">' + st + "</div></a>";
+      checksOf(lang).forEach(function (c) { if (c.to === d.day) h += checkCard(lang, c); });
     });
     $app.innerHTML = h + "</div>";
   }
@@ -554,7 +559,7 @@
       q.instr = L.instr.word; q.prompt = '<div class="q-word">' + T(w.w, lang, 0) + "</div>";
       q.opts = [w.m].concat(distract(w.m, mOpts(), 3)).map(function (x) { return K(x, lang, 0); });
     }
-    q.answer = 0;
+    q.answer = 0; q.ty = type || "mean";
     return q;
   }
   function wordTypes(lang, w) {
@@ -580,7 +585,7 @@
   // ----- 문제 풀이 틀 -----
   var QZ = null;
   function runQuiz(box, qs, opt) {
-    QZ = { qs: qs, i: 0, score: 0, wrong: [], opt: opt || {}, box: box, answered: false };
+    QZ = { qs: qs, i: 0, score: 0, wrong: [], log: [], opt: opt || {}, box: box, answered: false };
     showQ();
   }
   function showQ() {
@@ -611,6 +616,7 @@
     var q = z.qs[z.i]; z.answered = true;
     var ok = i === q.answer;
     if (ok) z.score++; else z.wrong.push(q);
+    if (q.key) z.log.push({ k: q.key, ty: q.ty || "", ok: ok ? 1 : 0 });
     z.box.querySelectorAll(".opt").forEach(function (b) {
       var k = +b.getAttribute("data-i"); b.disabled = true;
       if (k === q.answer) b.classList.add("right"); else if (k === i) b.classList.add("bad");
@@ -635,8 +641,8 @@
   });
   function finishQuiz() {
     var z = QZ, n = z.qs.length, pct = n ? Math.round(z.score / n * 100) : 0;
-    if (z.opt.onDone) z.opt.onDone(z.score, n);
-    var h = '<div class="result"><div class="r-score"><b>' + z.score + "</b> / " + n + '<span class="r-pct">' + pct + "%</span></div>";
+    if (z.opt.onDone) z.opt.onDone(z.score, n, z.log);
+    var h = '<div class="result"><div class="r-score"><b>' + z.score + "</b> / " + n + '<span class="r-pct">' + pct + "%</span></div>" + (z.opt.summary ? z.opt.summary(z.log) : "");
     if (z.wrong.length) {
       h += '<h3>틀린 문제</h3><ol class="r-wrong">' + z.wrong.map(function (q) { return "<li>" + '<div class="q-instr small">' + esc(q.instr) + "</div>" + q.prompt.replace(/<button[^>]*data-say[^>]*>[\s\S]*?<\/button>/, "") + '<div class="r-ans">정답: ' + q.opts[q.answer] + "</div>" + (q.after || "") + "</li>"; }).join("") + "</ol>";
     }
@@ -645,7 +651,7 @@
     var opt = z.opt, wrong = z.wrong, box = z.box;
     box.querySelector("#again").onclick = function () { runQuiz(box, opt.make(), opt); };
     var aw = box.querySelector("#againWrong");
-    if (aw) aw.onclick = function () { runQuiz(box, shuffle(wrong.map(function (q) { return q.remake ? q.remake() : q; })), Object.assign({}, opt, { onDone: null })); };
+    if (aw) aw.onclick = function () { runQuiz(box, shuffle(wrong.map(function (q) { return q.remake ? q.remake() : q; })), Object.assign({}, opt, { onDone: null, summary: null })); };
     QZ = null;
     box.scrollIntoView({ block: "start" });
   }
@@ -773,6 +779,27 @@
     };
   }
 
+  // 대화 한 줄을 듣고 뜻 고르기
+  function dialogQ(d, ln, lang) {
+    var L = LBY[lang], lines = d.dialogue.lines, c = d.dialogue.cast[ln.s];
+    var opts = [ln.k].concat(distract(ln.k, lines.map(function (l) { return l.k; }), 3));
+    return { lang: lang, tag: "대화 듣기", instr: L.instr.dialog, listen: { t: ln.t, v: c.voice }, prompt: '<div class="q-listen">' + spk(ln.t, lang, c.voice, "big") + "</div>",
+      opts: opts.map(function (x) { return K(x, lang, 0); }), answer: 0, after: '<div class="qa-expl"><div class="qa-full">' + T(ln.t, lang, L.helper.modes.length - 1) + "</div></div>" };
+  }
+  // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
+  function passageQs(rr, lang) {
+    var L = LBY[lang], hp = L.helper.modes.length - 1;
+    var pass = '<div class="passage mini"><h3>' + T(rr.title, lang, 0) + "</h3>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
+    return rr.qs.map(function (rq, qi) {
+      var ord = shuffle(rq.o.map(function (_, i) { return i; }));
+      var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang) + "</div>" +
+        (rq.oe ? '<ul class="oe">' + ord.map(function (k, j) { return '<li class="' + (k === rq.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(rq.o[k], lang) + '<div class="oe-t">' + K(rq.oe[k], lang) + "</div></div></li>"; }).join("") + "</ul>" : "") +
+        (qi === rr.qs.length - 1 && rr.k ? '<details class="trans"><summary>전문 해석</summary><div>' + K(rr.k, lang) + "</div></details>" : "") + "</div>";
+      return { lang: lang, tag: "독해", instr: L.instr.reading, fixed: true, prompt: pass + '<div class="q-sent">' + T(rq.q, lang, 0) + "</div>",
+        opts: ord.map(function (k) { return T(rq.o[k], lang, 0); }), answer: ord.indexOf(rq.a), after: af };
+    });
+  }
+
   // ----- 정리 테스트 -----
   function paneReview(pane, d, L) {
     var lang = L.id;
@@ -783,27 +810,10 @@
       var ws = pick(today, nt).concat(pick(before, nb));
       var qs = makeWordQs(ws, lang).map(function (q) { q.tag = "단어"; return q; });
       d.grammar.forEach(function (g) { (g.quiz || []).forEach(function (gq) { var q = grammarQ(gq, lang, g); q.tag = "문법"; q.answer = q.answer; q.fixed = true; qs.push(q); }); });
-      var lines = d.dialogue.lines, picks = pick(lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2);
-      picks.forEach(function (ln) {
-        var c = d.dialogue.cast[ln.s];
-        var opts = [ln.k].concat(distract(ln.k, lines.map(function (l) { return l.k; }), 3));
-        qs.push({ lang: lang, tag: "대화 듣기", instr: L.instr.dialog, listen: { t: ln.t, v: c.voice }, prompt: '<div class="q-listen">' + spk(ln.t, lang, c.voice, "big") + "</div>",
-          opts: opts.map(function (x) { return K(x, lang, 0); }), answer: 0, after: '<div class="qa-expl"><div class="qa-full">' + T(ln.t, lang, LBY[lang].helper.modes.length - 1) + "</div></div>" });
-      });
+      pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2).forEach(function (ln) { qs.push(dialogQ(d, ln, lang)); });
       qs = shuffle(qs);
       // 독해: 학습용과 다른 지문. 지문을 문제마다 함께 보인다
-      var rr = d.review && d.review.reading;
-      if (rr) {
-        var pass = '<div class="passage mini"><h3>' + T(rr.title, lang, 0) + "</h3>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
-        rr.qs.forEach(function (rq, qi) {
-          var ord = shuffle(rq.o.map(function (_, i) { return i; }));
-          var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, LBY[lang].helper.modes.length - 1) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang) + "</div>" +
-            (rq.oe ? '<ul class="oe">' + ord.map(function (k, j) { return '<li class="' + (k === rq.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(rq.o[k], lang) + '<div class="oe-t">' + K(rq.oe[k], lang) + "</div></div></li>"; }).join("") + "</ul>" : "") +
-            (qi === rr.qs.length - 1 && rr.k ? '<details class="trans"><summary>전문 해석</summary><div>' + K(rr.k, lang) + "</div></details>" : "") + "</div>";
-          qs.push({ lang: lang, tag: "독해", instr: L.instr.reading, fixed: true, prompt: pass + '<div class="q-sent">' + T(rq.q, lang, 0) + "</div>",
-            opts: ord.map(function (k) { return T(rq.o[k], lang, 0); }), answer: ord.indexOf(rq.a), after: af });
-        });
-      }
+      if (d.review && d.review.reading) qs = qs.concat(passageQs(d.review.reading, lang));
       return qs;
     }
     var nG = d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0);
@@ -811,6 +821,92 @@
     startScreen(pane, "정리 테스트", "단어 10문항(오늘 단어와 지난 날 단어에서 무작위), 문법 " + nG + "문항, 대화 듣기 2문항" + (nR ? ", 새 지문 독해 " + nR + "문항" : "") + ". 읽기 도움은 보이지 않습니다.", prog(lang, d.day).review, function () {
       runQuiz(pane, make(), { make: make, onDone: function (s, n) { prog(lang, d.day).review = { s: s, n: n, t: Date.now() }; saveProg(); } });
     });
+  }
+
+  // ----- 종합 점검 (5일마다) -----
+  // 단어(Day마다 고르게 무작위) + 문법(새 문항, 문법 항목마다 하나) + 대화 듣기 3 + 새 지문 독해.
+  // 문항마다 맞고 틀림(log)을 남긴다: PROG["<lang>-c<no>"] = { s, n, t, log, first: 첫 응시 }. 다음 5일 난이도는 이 기록으로 정한다(_tools/report.mjs).
+  function checksOf(lang) { return (window.FL_CHECKS || []).filter(function (c) { return c.lang === lang; }).sort(function (a, b) { return a.no - b.no; }); }
+  function checkRec(lang, no) { return PROG[lang + "-c" + no] || null; }
+  function checkCard(lang, c) {
+    var g = checkRec(lang, c.no), f = g && g.first;
+    return '<a class="day-card check-card" href="#/' + lang + "/check/" + c.no + '"><div class="day-head"><span class="day-no">점검 ' + c.no + '</span><span class="day-title">종합 점검 · Day ' + c.from + "–" + c.to + "</span></div>" +
+      '<div class="day-theme">' + (f ? "첫 응시 " + f.s + " / " + f.n + (g.t !== f.t ? " · 최근 " + g.s + " / " + g.n : "") : "Day " + c.from + "–" + c.to + "를 마친 뒤에 풉니다.") + "</div></a>";
+  }
+  function viewCheck(lang, no) {
+    var L = LBY[lang], c = checksOf(lang).filter(function (x) { return x.no === no; })[0];
+    var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>종합 점검 " + no + "</span></nav>";
+    if (!c) { $app.innerHTML = h + '<p class="empty">없는 점검입니다.</p>'; return; }
+    var ds = days(lang).filter(function (d) { return d.day >= c.from && d.day <= c.to; });
+    var per = lang === "ja" ? 5 : 4, nW = per * ds.length, nD = Math.min(3, ds.length);
+    function make() {
+      var qs = [];
+      ds.forEach(function (d) {
+        makeWordQs(pick(d.words, per).map(function (w) { return { w: w, day: d.day }; }), lang).forEach(function (q) { q.tag = "단어"; q.key = "w:" + q.wk; qs.push(q); });
+      });
+      c.grammar.forEach(function (gq) {
+        var r = gq.ref.split("."), d = dayOf(lang, +r[0]), gp = d && d.grammar[+r[1]];
+        var q = grammarQ(gq, lang, gp); q.tag = "문법"; q.fixed = true; q.key = "g:" + gq.ref; q.ty = "grammar"; qs.push(q);
+      });
+      pick(ds, nD).forEach(function (d) {
+        var ln = pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 1)[0];
+        if (ln) { var q = dialogQ(d, ln, lang); q.key = "d:" + d.day; q.ty = "dialog"; qs.push(q); }
+      });
+      return shuffle(qs).concat(passageQs(c.reading, lang).map(function (q, i) { q.key = "r:" + i; q.ty = "reading"; return q; }));
+    }
+    var g = checkRec(lang, no);
+    h += '<section class="hero small"><h1>종합 점검 ' + no + '</h1><p class="sub">Day ' + c.from + "–" + c.to + ' 전체를 한 번에 확인합니다.</p></section><div id="ckPane"></div>';
+    if (g && g.log) h += '<div class="ck-last"><h3>' + (g.first && g.t !== g.first.t ? "최근 결과" : "결과") + " (" + new Date(g.t).toLocaleDateString("ko-KR") + ")</h3>" + checkSummary(lang, g.log) + "</div>";
+    $app.innerHTML = h;
+    var pane = document.getElementById("ckPane");
+    startScreen(pane, "종합 점검 " + no,
+      "단어 " + nW + "문항(Day마다 " + per + "개씩 무작위), 문법 " + c.grammar.length + "문항(처음 보는 새 문항), 대화 듣기 " + nD + "문항, 새 지문 독해 " + c.reading.qs.length + "문항. 읽기 도움은 보이지 않습니다. 첫 응시 결과로 다음 5일의 난이도를 정하므로, 미리 복습하지 말고 지금 실력대로 풀어 주십시오.",
+      g && g.n ? g : null, function () {
+        var ck = document.querySelector(".ck-last"); if (ck) ck.remove();
+        runQuiz(pane, make(), { make: make, summary: function (log) { return checkSummary(lang, log); }, onDone: function (s, n, log) {
+          var rec = prog(lang, "c" + no), t = Date.now();
+          if (!rec.first) rec.first = { s: s, n: n, t: t, log: log };
+          rec.s = s; rec.n = n; rec.t = t; rec.log = log; saveProg();
+        } });
+      });
+  }
+  function checkSummary(lang, log) {
+    var area = {}, gram = [], order = [];
+    function add(name, ok) { if (!area[name]) { area[name] = [0, 0]; order.push(name); } area[name][1]++; if (ok) area[name][0]++; }
+    log.forEach(function (x) {
+      var p = x.k.split(":");
+      if (p[0] === "w") add("단어 · Day " + p[1], x.ok);
+      else if (p[0] === "g") gram.push(x);
+      else if (p[0] === "d") add("대화 듣기", x.ok);
+      else if (p[0] === "r") add("독해", x.ok);
+    });
+    order.sort(function (a, b) { return (a.indexOf("단어") === 0 ? 0 : 1) - (b.indexOf("단어") === 0 ? 0 : 1) || a.localeCompare(b); });
+    gram.sort(function (a, b) { return a.k.localeCompare(b.k); });
+    var h = '<div class="ck-sum"><table class="ck-t"><tbody>' + order.map(function (k) {
+      var v = area[k], pc = Math.round(v[0] / v[1] * 100);
+      return "<tr><th>" + esc(k) + "</th><td>" + v[0] + " / " + v[1] + '</td><td class="ck-bar"><i style="width:' + pc + '%"></i></td></tr>';
+    }).join("") + "</tbody></table>";
+    if (gram.length) h += '<h4>문법 항목</h4><ul class="ck-g">' + gram.map(function (x) {
+      var r = x.k.slice(2).split("."), d = dayOf(lang, +r[0]), gp = d && d.grammar[+r[1]];
+      return '<li class="' + (x.ok ? "ok" : "no") + '"><span class="ck-m">' + (x.ok ? "○" : "×") + "</span>Day " + r[0] + " · " + (gp ? T(gp.p, lang, 0) : esc(x.k)) + "</li>";
+    }).join("") + "</ul>";
+    return h + "</div>";
+  }
+  // 알림에 넣을 '오늘 할 것'(언어마다 다음 Day 또는 종합 점검)을 Cache에 둔다 → sw.js가 알림을 띄울 때 읽는다
+  function nextOf(lang) {
+    var ds = days(lang), cs = checksOf(lang);
+    for (var i = 0; i < ds.length; i++) {
+      if (dayDone(lang, ds[i]) < 6) return "Day " + ds[i].day;
+      for (var j = 0; j < cs.length; j++) if (cs[j].to === ds[i].day && !(checkRec(lang, cs[j].no) || {}).first) return "종합 점검 " + cs[j].no;
+    }
+    return null;
+  }
+  function nextUpSave() {
+    if (!window.caches || !/^https?:$/.test(location.protocol)) return;
+    var parts = []; LANGS.forEach(function (L) { var n = nextOf(L.id); if (n) parts.push(L.ko + " " + n); });
+    var body = parts.join(" · ");
+    if (body === nextUpSave.last) return; nextUpSave.last = body;
+    caches.open("fl-meta").then(function (c) { return c.put(new URL("fl-next", location.href).href, new Response(JSON.stringify({ body: body, t: Date.now() }), { headers: { "Content-Type": "application/json" } })); }).catch(function () {});
   }
 
   // ----- 오답 노트 -----
