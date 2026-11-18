@@ -786,6 +786,13 @@
     return { lang: lang, tag: "대화 듣기", instr: L.instr.dialog, listen: { t: ln.t, v: c.voice }, prompt: '<div class="q-listen">' + spk(ln.t, lang, c.voice, "big") + "</div>",
       opts: opts.map(function (x) { return K(x, lang, 0); }), answer: 0, after: '<div class="qa-expl"><div class="qa-full">' + T(ln.t, lang, L.helper.modes.length - 1) + "</div></div>" };
   }
+  // 새 문장 듣고 뜻 고르기(정리 테스트·종합 점검 전용 문장: { t, v, o:[정답, 오답…], a, e })
+  function listenQ(x, lang) {
+    var L = LBY[lang];
+    return { lang: lang, tag: "듣기", instr: L.instr.sent || L.instr.dialog, listen: { t: x.t, v: x.v || "F" }, prompt: '<div class="q-listen">' + spk(x.t, lang, x.v || "F", "big") + "</div>",
+      opts: x.o.map(function (o) { return K(o, lang, 0); }), answer: x.a || 0,
+      after: '<div class="qa-expl"><div class="qa-full">' + T(x.t, lang, L.helper.modes.length - 1) + "</div>" + (x.e ? '<p class="expl">' + K(x.e, lang) + "</p>" : "") + "</div>" };
+  }
   // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
   function passageQs(rr, lang) {
     var L = LBY[lang], hp = L.helper.modes.length - 1;
@@ -809,16 +816,19 @@
       var nb = Math.min(before.length, 3), nt = 10 - nb;
       var ws = pick(today, nt).concat(pick(before, nb));
       var qs = makeWordQs(ws, lang).map(function (q) { q.tag = "단어"; return q; });
-      d.grammar.forEach(function (g) { (g.quiz || []).forEach(function (gq) { var q = grammarQ(gq, lang, g); q.tag = "문법"; q.answer = q.answer; q.fixed = true; qs.push(q); }); });
-      pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2).forEach(function (ln) { qs.push(dialogQ(d, ln, lang)); });
+      var rv = d.review || {};
+      if (rv.grammar) rv.grammar.forEach(function (gq) { var q = grammarQ(gq, lang, d.grammar[gq.g]); q.tag = "문법"; q.fixed = true; qs.push(q); });
+      else d.grammar.forEach(function (g) { (g.quiz || []).forEach(function (gq) { var q = grammarQ(gq, lang, g); q.tag = "문법"; q.fixed = true; qs.push(q); }); });
+      if (rv.listen) rv.listen.forEach(function (x) { qs.push(listenQ(x, lang)); });
+      else pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2).forEach(function (ln) { qs.push(dialogQ(d, ln, lang)); });
       qs = shuffle(qs);
       // 독해: 학습용과 다른 지문. 지문을 문제마다 함께 보인다
       if (d.review && d.review.reading) qs = qs.concat(passageQs(d.review.reading, lang));
       return qs;
     }
-    var nG = d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0);
+    var rv0 = d.review || {}, nG = rv0.grammar ? rv0.grammar.length : d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0), nL = rv0.listen ? rv0.listen.length : 2;
     var nR = d.review && d.review.reading ? d.review.reading.qs.length : 0;
-    startScreen(pane, "정리 테스트", "단어 10문항(오늘 단어와 지난 날 단어에서 무작위), 문법 " + nG + "문항, 대화 듣기 2문항" + (nR ? ", 새 지문 독해 " + nR + "문항" : "") + ". 읽기 도움은 보이지 않습니다.", prog(lang, d.day).review, function () {
+    startScreen(pane, "정리 테스트", "단어 10문항(오늘 단어와 지난 날 단어에서 무작위), 문법 " + nG + "문항, 듣기 " + nL + "문항" + (nR ? ", 독해 " + nR + "문항" : "") + ". 문법·듣기·독해는 학습 화면에 나오지 않은 새 문장입니다. 읽기 도움은 보이지 않습니다.", prog(lang, d.day).review, function () {
       runQuiz(pane, make(), { make: make, onDone: function (s, n) { prog(lang, d.day).review = { s: s, n: n, t: Date.now() }; saveProg(); } });
     });
   }
@@ -838,7 +848,7 @@
     var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>종합 점검 " + no + "</span></nav>";
     if (!c) { $app.innerHTML = h + '<p class="empty">없는 점검입니다.</p>'; return; }
     var ds = days(lang).filter(function (d) { return d.day >= c.from && d.day <= c.to; });
-    var per = lang === "ja" ? 5 : 4, nW = per * ds.length, nD = Math.min(3, ds.length);
+    var per = lang === "ja" ? 5 : 4, nW = per * ds.length, nD = c.listen ? c.listen.length : Math.min(3, ds.length);
     function make() {
       var qs = [];
       ds.forEach(function (d) {
@@ -848,7 +858,8 @@
         var r = gq.ref.split("."), d = dayOf(lang, +r[0]), gp = d && d.grammar[+r[1]];
         var q = grammarQ(gq, lang, gp); q.tag = "문법"; q.fixed = true; q.key = "g:" + gq.ref; q.ty = "grammar"; qs.push(q);
       });
-      pick(ds, nD).forEach(function (d) {
+      if (c.listen) c.listen.forEach(function (x, i) { var q = listenQ(x, lang); q.key = "l:" + i; q.ty = "listen-s"; qs.push(q); });
+      else pick(ds, nD).forEach(function (d) {
         var ln = pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 1)[0];
         if (ln) { var q = dialogQ(d, ln, lang); q.key = "d:" + d.day; q.ty = "dialog"; qs.push(q); }
       });
@@ -860,7 +871,7 @@
     $app.innerHTML = h;
     var pane = document.getElementById("ckPane");
     startScreen(pane, "종합 점검 " + no,
-      "단어 " + nW + "문항(Day마다 " + per + "개씩 무작위), 문법 " + c.grammar.length + "문항(처음 보는 새 문항), 대화 듣기 " + nD + "문항, 새 지문 독해 " + c.reading.qs.length + "문항. 읽기 도움은 보이지 않습니다. 첫 응시 결과로 다음 5일의 난이도를 정하므로, 미리 복습하지 말고 지금 실력대로 풀어 주십시오.",
+      "단어 " + nW + "문항(Day마다 " + per + "개씩 무작위), 문법 " + c.grammar.length + "문항, 듣기 " + nD + "문항, 독해 " + c.reading.qs.length + "문항. 문법·듣기·독해는 모두 처음 보는 새 문장입니다. 읽기 도움은 보이지 않습니다. 첫 응시 결과로 다음 5일의 난이도를 정하므로, 미리 복습하지 말고 지금 실력대로 풀어 주십시오.",
       g && g.n ? g : null, function () {
         var ck = document.querySelector(".ck-last"); if (ck) ck.remove();
         runQuiz(pane, make(), { make: make, summary: function (log) { return checkSummary(lang, log); }, onDone: function (s, n, log) {
@@ -877,7 +888,7 @@
       var p = x.k.split(":");
       if (p[0] === "w") add("단어 · Day " + p[1], x.ok);
       else if (p[0] === "g") gram.push(x);
-      else if (p[0] === "d") add("대화 듣기", x.ok);
+      else if (p[0] === "d" || p[0] === "l") add("듣기", x.ok);
       else if (p[0] === "r") add("독해", x.ok);
     });
     order.sort(function (a, b) { return (a.indexOf("단어") === 0 ? 0 : 1) - (b.indexOf("단어") === 0 ? 0 : 1) || a.localeCompare(b); });
