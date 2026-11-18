@@ -213,7 +213,7 @@
     return n;
   }
   function viewHome() {
-    var h = '<section class="hero"><h1>외국어 공부</h1><p class="sub">일차별로 단어 → 문법 → 대화 → 독해 → 정리 테스트 순서로 공부합니다.</p></section><div class="langs">';
+    var h = '<section class="hero"><img class="logo big" src="icon-192.png" alt=""><h1>외국어 공부</h1><p class="sub">일차별로 단어 → 문법 → 대화 → 독해 → 정리 테스트 순서로 공부합니다.</p></section><div class="langs">';
     LANGS.forEach(function (L) {
       var ds = days(L.id), full = ds.filter(function (d) { return dayDone(L.id, d) === 6; }).length;
       var nw = Object.keys(wrongOf(L.id)).length;

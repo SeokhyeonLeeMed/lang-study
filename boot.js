@@ -43,7 +43,7 @@
     });
   }
   function form(msg) {
-    app.innerHTML = '<form class="lock" id="lockForm"><h1>외국어 공부</h1><p class="sub">비밀번호를 넣어 주십시오.</p>' +
+    app.innerHTML = '<form class="lock" id="lockForm"><img class="logo big" src="icon-192.png" alt=""><h1>외국어 공부</h1><p class="sub">비밀번호를 넣어 주십시오.</p>' +
       '<input type="password" id="pw" autocomplete="current-password" required autofocus>' +
       '<label class="tgl"><input type="checkbox" id="rem" checked> 이 기기에서 기억하기</label>' +
       '<button class="btn" type="submit">열기</button>' + (msg ? '<p class="err">' + msg + "</p>" : "") + "</form>";
