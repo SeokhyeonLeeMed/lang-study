@@ -47,7 +47,7 @@
   }
   function form(msg) {
     app.innerHTML = '<form class="lock" id="lockForm"><img class="logo big" src="icon-192.png" alt=""><h1>외국어 공부</h1><p class="sub">의대 퀴즈 사이트 계정으로 로그인합니다.</p>' +
-      '<input id="lid" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ID" required autofocus>' +
+      '<input type="text" id="lid" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ID" required autofocus>' +
       '<input type="password" id="lpw" autocomplete="current-password" placeholder="비밀번호" required>' +
       '<button class="btn" type="submit">로그인</button>' + (msg ? '<p class="err">' + esc(msg) + "</p>" : "") + "</form>";
     document.getElementById("lockForm").onsubmit = function (e) {
