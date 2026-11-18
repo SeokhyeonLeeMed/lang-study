@@ -29,7 +29,7 @@
       return getBin("d.bin?v=" + meta.v).then(function (buf) { return decrypt(key, buf); }).then(gunzip).then(function (txt) {
         var d = JSON.parse(txt);
         if (remember) { try { localStorage.setItem(KEYSTORE, b64(raw)); } catch (e) {} }
-        window.FL_LANGS = d.langs; window.FL_BANK = d.bank;
+        window.FL_LANGS = d.langs; window.FL_BANK = d.bank; if (d.sync) window.FL_SYNC = d.sync;
         var cache = {};
         window.FL_AUDIO_URL = function (path) {
           if (cache[path]) return cache[path];

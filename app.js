@@ -17,10 +17,10 @@
   function saveSet() { save("fl_set", SET); }
   var PROG = load("fl_prog", {});
   function prog(lang, day) { var k = lang + "-" + day; return PROG[k] || (PROG[k] = {}); }
-  function saveProg() { save("fl_prog", PROG); }
+  function saveProg() { save("fl_prog", PROG); syncDirty(); }
   var WRONG = load("fl_wrong", {});
   function wrongOf(lang) { return WRONG[lang] || (WRONG[lang] = {}); }
-  function saveWrong() { save("fl_wrong", WRONG); }
+  function saveWrong() { save("fl_wrong", WRONG); syncDirty(); }
 
   // ---------- 도움 ----------
   function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
@@ -168,8 +168,10 @@
       h += '<button type="button" class="chip" id="helperBtn" title="읽기 도움 바꾸기">' + esc(L.helper.label) + " · " + esc(L.helper.modes[SET.helper[L.id]]) + "</button>";
     }
     h += '<button type="button" class="chip" id="speedBtn" title="음성 빠르기">' + SET.speed + "×</button>";
+    if (SY.cfg) h += '<span class="chip sync" id="syncChip" hidden></span>';
     if (window.FL_LOGOUT) h += '<button type="button" class="chip" id="lockBtn" title="이 기기에서 비밀번호 잊기">잠그기</button>';
     box.innerHTML = h;
+    var sc = document.getElementById("syncChip"); if (sc) chipSync(sc);
     var lb = document.getElementById("lockBtn"); if (lb) lb.onclick = function () { if (confirm("이 기기에 저장된 열쇠를 지우고 잠글까요?")) window.FL_LOGOUT(); };
     var hb = document.getElementById("helperBtn");
     if (hb) hb.onclick = function () { var L = LBY[ROUTE.lang]; SET.helper[L.id] = (SET.helper[L.id] + 1) % L.helper.modes.length; saveSet(); rerender(); };
@@ -223,21 +225,142 @@
         '<span class="bar"><i style="width:' + (ds.length ? Math.round(full / ds.length * 100) : 0) + '%"></i></span></a>';
     });
     $app.innerHTML = h + "</div>" +
-      '<section class="device"><h2>이 기기</h2><div class="dv-row" id="pushRow"></div>' +
-      '<div class="dv-row"><div class="dv-title">기록 옮기기</div><p class="sub">홈 화면 앱을 지웠다 다시 추가하면 기록이 사라집니다. 지우기 전에 복사해 두었다가 새 앱에서 붙여 넣으십시오.</p>' +
-      '<div class="row-actions"><button type="button" class="btn sm ghost" id="recCopy">기록 복사</button><button type="button" class="btn sm ghost" id="recPaste">기록 붙여넣기</button></div></div></section>';
+      '<section class="device"><h2>설정</h2><div class="dv-row" id="syncRow"></div><div class="dv-row" id="pushRow"></div></section>';
+    syncUI();
     pushUI();
-    document.getElementById("recCopy").onclick = function () {
-      copyText("외국어공부기록 " + JSON.stringify({ prog: PROG, wrong: WRONG, set: SET })).then(function (ok) { alert(ok ? "기록을 복사했습니다. 새 앱에서 '기록 붙여넣기'를 누르십시오." : "복사하지 못했습니다."); });
-    };
-    document.getElementById("recPaste").onclick = function () {
-      var t = prompt("복사해 둔 기록을 붙여 넣어 주십시오.");
-      if (!t) return;
-      var d; try { d = JSON.parse(t.slice(t.indexOf("{"))); } catch (e) { d = null; }
-      if (!d || typeof d.prog !== "object") { alert("기록 형식이 아닙니다."); return; }
-      if (!confirm("지금 이 기기의 기록을 붙여 넣은 기록으로 바꿀까요?")) return;
-      save("fl_prog", d.prog || {}); save("fl_wrong", d.wrong || {}); if (d.set) save("fl_set", d.set);
-      location.reload();
+  }
+
+  // ---------- 기록 저장 (서버) ----------
+  // 공개판에서만 켜진다(boot.js가 d.bin 안의 설정으로 window.FL_SYNC를 만든다). 퀴즈 사이트와 같은 Supabase 계정으로 로그인하고,
+  // user_files(본인만 읽고 쓰는 표)의 한 줄(path)에 {prog, wrong, upd}를 둔다. ver로 동시 저장을 막는다.
+  // 이 기기의 localStorage는 사본(오프라인일 때·불러오기 전)일 뿐이고, 서버가 원본이다.
+  var SY = { cfg: window.FL_SYNC || null, sb: null, user: null, ver: null, st: "off", last: 0, timer: null, busy: false, again: false, err: "" };
+  var SYMETA = load("fl_sync", {});   // { uid: 마지막으로 맞춘 계정, dirty: 서버에 아직 안 올린 변경이 있음, t: 그 변경 시각 }
+  function syncState(s, err) { SY.st = s; SY.err = err || ""; var c = document.getElementById("syncChip"); if (c) chipSync(c); syncUI(); }
+  function chipSync(c) {
+    var m = { saved: "저장됨 " + hhmm(SY.last), saving: "저장 중…", error: "저장 안 됨", loading: "불러오는 중…" }[SY.st];
+    c.hidden = !m; c.textContent = m || ""; c.classList.toggle("bad", SY.st === "error"); c.classList.toggle("ok", SY.st === "saved");
+    c.title = SY.st === "error" ? "서버에 저장하지 못했습니다. 연결되면 다시 저장합니다." + (SY.err ? " (" + SY.err + ")" : "") : "기록은 서버에 저장됩니다.";
+  }
+  function hhmm(t) { var d = new Date(t); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); }
+  function syncDirty() {
+    SYMETA.dirty = true; SYMETA.t = Date.now(); save("fl_sync", SYMETA);
+    if (!SY.user) return;
+    clearTimeout(SY.timer); SY.timer = setTimeout(syncPush, 1500);
+  }
+  function syncLoadLib() {
+    if (window.supabase) return Promise.resolve();
+    return new Promise(function (res, rej) {
+      var s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js";
+      s.onload = res; s.onerror = function () { rej(new Error("연결 프로그램을 불러오지 못했습니다")); }; document.head.appendChild(s);
+    });
+  }
+  function syncInit() {
+    if (!SY.cfg) return;
+    syncState("loading");
+    syncLoadLib().then(function () {
+      SY.sb = window.supabase.createClient(SY.cfg.url, SY.cfg.anonKey, { auth: { persistSession: true, storageKey: "fl-sb-auth", autoRefreshToken: true } });
+      return SY.sb.auth.getSession();
+    }).then(function (r) {
+      SY.user = r.data && r.data.session ? r.data.session.user : null;
+      if (SY.user) return syncPull(); syncState("out");
+    }).catch(function (e) { syncState(SY.user ? "error" : "out", e.message); });
+    document.addEventListener("visibilitychange", function () {
+      if (!SY.user) return;
+      if (document.visibilityState === "hidden") { if (SYMETA.dirty) { clearTimeout(SY.timer); syncPush(); } }
+      else if (!SY.busy) syncPull();   // 다른 기기에서 공부한 것 받아 오기
+    });
+    window.addEventListener("online", function () { if (SY.user) syncPull(); });
+  }
+  // 두 기록 합치기: 공부 표시·테스트 점수는 합집합(같은 칸이면 늦게 한 쪽), 오답 노트는 최근에 바꾼 쪽을 바탕으로 다른 쪽에만 있는 단어를 더한다
+  function syncMerge(loc, rem, locNewer) {
+    var prog = JSON.parse(JSON.stringify(rem.prog || {}));
+    Object.keys(loc.prog || {}).forEach(function (k) {
+      var a = loc.prog[k] || {}, b = prog[k] || (prog[k] = {});
+      Object.keys(a).forEach(function (t) {
+        var x = a[t], y = b[t];
+        if (y == null) b[t] = x;
+        else if (x && typeof x === "object" && (!y || typeof y !== "object" || (x.t || 0) > (y.t || 0))) b[t] = x;
+      });
+    });
+    var base = locNewer ? loc.wrong : rem.wrong, other = locNewer ? rem.wrong : loc.wrong;
+    var wrong = JSON.parse(JSON.stringify(base || {}));
+    Object.keys(other || {}).forEach(function (l) { var w = wrong[l] || (wrong[l] = {}); Object.keys(other[l] || {}).forEach(function (k) { if (!w[k]) w[k] = other[l][k]; }); });
+    return { prog: prog, wrong: wrong };
+  }
+  function syncApply(doc) {
+    var changed = JSON.stringify(doc.prog) !== JSON.stringify(PROG) || JSON.stringify(doc.wrong) !== JSON.stringify(WRONG);
+    PROG = doc.prog || {}; WRONG = doc.wrong || {};
+    save("fl_prog", PROG); save("fl_wrong", WRONG);
+    if (changed && !ROUTE.day) rerender();   // Day 화면(테스트 중일 수 있음)은 건드리지 않는다
+  }
+  function syncPull() {
+    if (!SY.user) return Promise.resolve();
+    SY.busy = true; if (SY.st !== "saved") syncState("loading");
+    return SY.sb.from("user_files").select("data,ver").eq("user_id", SY.user.id).eq("path", SY.cfg.path).maybeSingle().then(function (r) {
+      if (r.error) throw r.error;
+      var row = r.data, local = { prog: PROG, wrong: WRONG };
+      SY.ver = row ? row.ver : null;
+      var first = SYMETA.uid !== SY.user.id;   // 이 기기에서 이 계정으로 처음 맞춤 → 이 기기 기록도 합친다
+      var need = false;
+      if (!row) need = true;
+      else if (first || SYMETA.dirty) {
+        var m = syncMerge(local, row.data || {}, (SYMETA.t || 0) > ((row.data && row.data.upd) || 0));
+        syncApply(m); need = JSON.stringify(m) !== JSON.stringify({ prog: (row.data || {}).prog || {}, wrong: (row.data || {}).wrong || {} });
+      } else syncApply(row.data || {});
+      SYMETA.uid = SY.user.id; if (!need) SYMETA.dirty = false; save("fl_sync", SYMETA);
+      SY.busy = false;
+      if (need) { SYMETA.dirty = true; return syncPush(); }
+      SY.last = row && row.data && row.data.upd || Date.now(); syncState("saved");
+    }).catch(function (e) { SY.busy = false; syncState("error", e.message || String(e)); });
+  }
+  function syncPush() {
+    if (!SY.user) return Promise.resolve();
+    if (SY.busy) { SY.again = true; return Promise.resolve(); }
+    SY.busy = true; syncState("saving");
+    var t0 = SYMETA.t, doc = { prog: PROG, wrong: WRONG, upd: Date.now() };
+    var q = SY.ver == null
+      ? SY.sb.from("user_files").insert({ user_id: SY.user.id, path: SY.cfg.path, data: doc, ver: 1 }).select("ver")
+      : SY.sb.from("user_files").update({ data: doc, ver: SY.ver + 1 }).eq("user_id", SY.user.id).eq("path", SY.cfg.path).eq("ver", SY.ver).select("ver");
+    return q.then(function (r) {
+      SY.busy = false;
+      var conflict = (r.error && /duplicate|23505/.test(r.error.message + r.error.code)) || (!r.error && (!r.data || !r.data.length));
+      if (conflict) { SYMETA.dirty = true; save("fl_sync", SYMETA); return syncPull(); }   // 다른 기기가 먼저 저장 → 받아서 합친 뒤 다시 올린다
+      if (r.error) throw r.error;
+      SY.ver = r.data[0].ver; SY.last = doc.upd;
+      if (SYMETA.t === t0) { SYMETA.dirty = false; save("fl_sync", SYMETA); }
+      syncState("saved");
+      if (SY.again || SYMETA.dirty) { SY.again = false; return syncPush(); }
+    }).catch(function (e) { SY.busy = false; syncState("error", e.message || String(e)); });
+  }
+  function syncUI() {
+    var el = document.getElementById("syncRow"); if (!el) return;
+    var h = '<div class="dv-title">기록 저장</div>';
+    if (!SY.cfg) { el.innerHTML = h + '<p class="sub">공개 사이트에서만 서버에 저장됩니다. 지금은 이 브라우저에만 남습니다.</p>'; return; }
+    if (SY.st === "out") {
+      el.innerHTML = h + '<p class="sub">로그인하면 기록이 서버에 저장되어 어느 기기에서나 이어집니다. 의대 퀴즈 사이트의 ID와 비밀번호를 씁니다. 기록은 본인만 볼 수 있습니다.</p>' +
+        '<form class="sync-login" id="syncForm"><input id="syId" autocomplete="username" autocapitalize="none" placeholder="ID" required>' +
+        '<input id="syPw" type="password" autocomplete="current-password" placeholder="비밀번호" required><button class="btn sm" type="submit">로그인</button></form>' +
+        (SY.err ? '<p class="err">' + esc(SY.err) + "</p>" : "");
+      document.getElementById("syncForm").onsubmit = function (e) {
+        e.preventDefault();
+        var id = document.getElementById("syId").value.trim().toLowerCase(), pw = document.getElementById("syPw").value;
+        this.querySelector("button").disabled = true;
+        SY.sb.auth.signInWithPassword({ email: id + "@" + SY.cfg.idDomain, password: pw }).then(function (r) {
+          if (r.error) throw r.error;
+          SY.user = r.data.user; return syncPull();
+        }).catch(function (er) { syncState("out", /invalid login/i.test(er.message) ? "ID 또는 비밀번호가 맞지 않습니다." : er.message); });
+      };
+      return;
+    }
+    var id = SY.user && SY.user.email ? SY.user.email.split("@")[0] : "";
+    var msg = { loading: "불러오는 중…", saving: "저장 중…", saved: "저장됨 " + hhmm(SY.last), error: "저장하지 못했습니다. 연결되면 다시 저장합니다." }[SY.st] || "";
+    el.innerHTML = h + '<p class="sub">' + (id ? esc(id) + " 계정에 저장합니다. " : "") + esc(msg) + "</p>" +
+      (SY.user ? '<div class="row-actions"><button type="button" class="btn sm ghost" id="syNow">지금 불러오기</button><button type="button" class="btn sm ghost" id="syOut">로그아웃</button></div>' : "");
+    var n = document.getElementById("syNow"); if (n) n.onclick = function () { (SYMETA.dirty ? syncPush() : syncPull()); };
+    var o = document.getElementById("syOut"); if (o) o.onclick = function () {
+      if (!confirm("로그아웃할까요? 이 기기의 기록은 서버에 저장된 그대로 남습니다.")) return;
+      (SYMETA.dirty ? syncPush() : Promise.resolve()).then(function () { return SY.sb.auth.signOut(); }).then(function () { SY.user = null; SY.ver = null; syncState("out"); });
     };
   }
 
@@ -735,4 +858,5 @@
   }
 
   route();
+  syncInit();
 })();

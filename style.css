@@ -253,6 +253,14 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 80px; }
 .lock { max-width: 360px; margin: 12vh auto 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 24px; box-shadow: var(--shadow); display: grid; gap: 12px; }
 .lock h1 { margin: 0; font-size: 24px; }
 .lock .logo.big { justify-self: center; }
+.chip.sync { font-size: 12px; color: var(--ink-3); border-color: transparent; background: transparent; padding-left: 4px; padding-right: 4px; }
+.chip.sync.bad { color: var(--bad); }
+.brand { white-space: nowrap; }
+@media (max-width: 480px) { .chip.sync.ok { display: none; } body:not([data-lang=""]) .brand-t { display: none; } }
+.sync-login { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin: 10px 0 4px; }
+.sync-login input { min-width: 0; font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
+@media (max-width: 480px) { .sync-login { grid-template-columns: 1fr; } }
+.device .err { color: var(--bad); margin: 6px 0 0; }
 .lock h1, .lock > .sub { text-align: center; }
 .lock input[type=password] { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
 .lock .btn { justify-content: center; }
