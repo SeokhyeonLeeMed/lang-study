@@ -125,22 +125,116 @@
       }).catch(function () { webSpeak(text, lang, v).then(res); });
     });
   }
-  function stopAudio() { seqId++; try { AU.pause(); } catch (e) {} if (window.speechSynthesis) speechSynthesis.cancel(); markPlaying(null); }
+  function hush() { try { AU.pause(); } catch (e) {} if (window.speechSynthesis) speechSynthesis.cancel(); }
+  function stopAudio() { seqId++; hush(); markPlaying(null); plClose(); }
   function markPlaying(el) {
     if (curBtn) curBtn.classList.remove("playing");
     curBtn = el; if (el) el.classList.add("playing");
   }
-  // 차례로 읽기. items: [{t, v, el}]
-  function playSeq(items, lang) {
-    stopAudio(); var my = ++seqId, i = 0;
-    (function next() {
-      if (my !== seqId || i >= items.length) { if (my === seqId) markPlaying(null); return; }
-      var it = items[i++];
-      markPlaying(it.el || null);
-      if (it.el && it.el.scrollIntoView) it.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      playOne(it.t, lang, it.v).then(function () { if (my === seqId) setTimeout(next, 350); });
-    })();
+
+  // ---------- 이어 듣기 (전체 듣기 플레이어) ----------
+  // 대화·독해·단어의 '전체 듣기'. 아래에 뜨는 막대로 이전/다시/멈춤/다음을 고르고,
+  // 대화 말풍선·독해 단락을 누르면 그 줄부터 끝까지 이어서 읽는다(2026-11-20 사용자 요청).
+  // items: [{t, v, el, who?}], start: 시작 줄 번호
+  var PL = null;
+  function playSeq(items, lang, start) {
+    stopAudio();
+    PL = { items: items, lang: lang, i: Math.max(0, Math.min(start || 0, items.length - 1)), my: ++seqId, paused: false, waiting: false };
+    document.body.classList.add("pl-on");
+    plStep();
   }
+  function plStep() {
+    var P = PL; if (!P) return;
+    if (P.i >= P.items.length) { markPlaying(null); plClose(); return; }
+    var it = P.items[P.i], my = P.my;
+    P.waiting = false; P.paused = false;
+    markPlaying(it.el || null);
+    if (it.el && it.el.scrollIntoView) it.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    plUI();
+    playOne(it.t, P.lang, it.v).then(function () {
+      if (PL !== P || P.my !== my) return;
+      setTimeout(function () {
+        if (PL !== P || P.my !== my) return;
+        if (P.paused) { P.waiting = true; return; }   // 줄 사이에서 멈춘 경우: 다시 누르면 다음 줄로
+        P.i++; plStep();
+      }, 380);
+    });
+  }
+  // j번 줄부터 다시(같은 줄을 누르면 그 줄을 한 번 더)
+  function plJump(j) {
+    var P = PL; if (!P) return;
+    hush(); P.my = ++seqId;
+    P.i = Math.max(0, Math.min(j, P.items.length - 1));
+    plStep();
+  }
+  function plToggle() {
+    var P = PL; if (!P) return;
+    if (!P.paused) {
+      P.paused = true;
+      try { AU.pause(); } catch (e) {}
+      if (window.speechSynthesis && speechSynthesis.speaking) speechSynthesis.pause();
+    } else {
+      P.paused = false;
+      if (P.waiting) { P.i++; P.my = ++seqId; plStep(); return; }
+      if (window.speechSynthesis && speechSynthesis.paused) speechSynthesis.resume();
+      else if (AU.src && AU.paused && !AU.ended) { var p = AU.play(); if (p && p.catch) p.catch(function () { plJump(P.i); }); }
+      else plJump(P.i);
+    }
+    plUI();
+  }
+  function plClose() {
+    PL = null; document.body.classList.remove("pl-on");
+    var bar = document.getElementById("plBar"); if (bar) bar.hidden = true;
+  }
+  // 목록에서 누른 요소가 플레이어의 몇 번째 줄인지
+  function plIndexOf(el) {
+    if (!PL) return -1;
+    for (var i = 0; i < PL.items.length; i++) if (PL.items[i].el === el) return i;
+    return -1;
+  }
+  function plUI() {
+    var P = PL, bar = document.getElementById("plBar");
+    if (!bar) {
+      bar = document.createElement("div"); bar.id = "plBar"; bar.className = "pl-bar"; bar.setAttribute("role", "toolbar"); bar.setAttribute("aria-label", "이어 듣기");
+      bar.innerHTML = '<div class="pl-info"><span class="pl-eq" aria-hidden="true"><i></i><i></i><i></i></span><span class="pl-who"></span><span class="pl-n"></span></div>' +
+        '<div class="pl-btns"><button type="button" data-pl="prev" title="이전 줄 (←)" aria-label="이전 줄">' + ICON.prev + '</button>' +
+        '<button type="button" data-pl="again" title="이 줄 다시 (R)" aria-label="이 줄 다시">' + ICON.again + '</button>' +
+        '<button type="button" data-pl="toggle" class="pl-main" title="멈춤/계속 (Space)" aria-label="멈춤/계속"></button>' +
+        '<button type="button" data-pl="next" title="다음 줄 (→)" aria-label="다음 줄">' + ICON.next + '</button>' +
+        '<button type="button" data-pl="close" title="끄기 (Esc)" aria-label="끄기">' + ICON.close + "</button></div>" +
+        '<div class="pl-prog"><i></i></div>';
+      document.body.appendChild(bar);
+      bar.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-pl]"); if (!b || !PL) return;
+        var a = b.getAttribute("data-pl");
+        if (a === "prev") plJump(PL.i - 1);
+        else if (a === "next") { if (PL.i + 1 >= PL.items.length) stopAudio(); else plJump(PL.i + 1); }
+        else if (a === "again") plJump(PL.i);
+        else if (a === "toggle") plToggle();
+        else if (a === "close") stopAudio();
+      });
+    }
+    if (!P) { bar.hidden = true; return; }
+    bar.hidden = false;
+    var it = P.items[P.i] || {};
+    bar.classList.toggle("paused", !!P.paused);
+    bar.querySelector(".pl-who").textContent = it.who || "";
+    bar.querySelector(".pl-n").textContent = (P.i + 1) + " / " + P.items.length;
+    bar.querySelector(".pl-main").innerHTML = P.paused ? ICON.play : ICON.pause;
+    bar.querySelector('[data-pl="prev"]').disabled = P.i === 0;
+    bar.querySelector(".pl-prog i").style.width = Math.round((P.i + 1) / P.items.length * 100) + "%";
+  }
+  document.addEventListener("keydown", function (e) {
+    if (!PL || QZ || e.altKey || e.ctrlKey || e.metaKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    var k = e.key;
+    if (k === " " || k === "Spacebar") { e.preventDefault(); plToggle(); }
+    else if (k === "ArrowLeft") { e.preventDefault(); plJump(PL.i - 1); }
+    else if (k === "ArrowRight") { e.preventDefault(); if (PL.i + 1 >= PL.items.length) stopAudio(); else plJump(PL.i + 1); }
+    else if (k === "r" || k === "R") { e.preventDefault(); plJump(PL.i); }
+    else if (k === "Escape") stopAudio();
+  });
+  // 글을 끌어 고르는 중이면 누름으로 치지 않는다
+  function selecting() { var s = window.getSelection && window.getSelection(); return !!(s && String(s).length); }
   var SAY = []; // 버튼 → {t, v, lang}
   function spk(text, lang, v, cls) {
     SAY.push({ t: text, v: v || "F", lang: lang });
@@ -150,7 +244,12 @@
     spk: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 10v4a1 1 0 0 0 1 1h3l4 4V5L7 9H4a1 1 0 0 0-1 1zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
     play: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>',
     stop: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M6 6h12v12H6z"/></svg>',
-    check: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'
+    check: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6 5h2v14H6zM9.5 12 19 5v14z"/></svg>',
+    next: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M16 5h2v14h-2zM14.5 12 5 19V5z"/></svg>',
+    again: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>',
+    close: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'
   };
 
   document.addEventListener("click", function (e) {
@@ -217,15 +316,19 @@
     ["wtest", "reading", "review"].forEach(function (k) { if (g[k]) n++; });
     return n;
   }
+  var GLYPH = { ja: "あ", zh: "中", ru: "Я" };
   function viewHome() {
-    var h = '<section class="hero"><img class="logo big" src="icon-192.png" alt=""><h1>외국어 공부</h1><p class="sub">일차별로 단어 → 문법 → 대화 → 독해 → 정리 테스트 순서로 공부합니다.</p></section><div class="langs">';
+    var h = '<section class="hero home"><img class="logo big" src="icon-192.png" alt=""><div><h1>외국어 공부</h1><p class="sub">일차별로 단어 → 문법 → 대화 → 독해 → 정리 테스트 순서로 공부합니다.</p></div></section><div class="langs">';
     LANGS.forEach(function (L) {
       var ds = days(L.id), full = ds.filter(function (d) { return dayDone(L.id, d) === 6; }).length;
       var nw = Object.keys(wrongOf(L.id)).length;
-      h += '<a class="lang-card" href="#/' + L.id + '" data-l="' + L.id + '"><span class="lang-name" lang="' + L.tag + '">' + esc(L.name) + "</span>" +
+      var nx = nextOf(L.id);
+      h += '<a class="lang-card" href="#/' + L.id + '" data-l="' + L.id + '"><span class="lang-glyph" aria-hidden="true" lang="' + L.tag + '">' + GLYPH[L.id] + "</span>" +
+        '<span class="lang-name" lang="' + L.tag + '">' + esc(L.name) + "</span>" +
         '<span class="lang-ko">' + esc(L.ko) + ' · 목표 ' + esc(L.goal) + "</span>" +
         '<span class="lang-meta">Day ' + ds.length + "개 · 끝낸 날 " + full + (nw ? " · 오답 " + nw : "") + "</span>" +
-        '<span class="bar"><i style="width:' + (ds.length ? Math.round(full / ds.length * 100) : 0) + '%"></i></span></a>';
+        '<span class="bar"><i style="width:' + (ds.length ? Math.round(full / ds.length * 100) : 0) + '%"></i></span>' +
+        (nx ? '<span class="lang-next">다음 · ' + esc(nx) + "</span>" : '<span class="lang-next done">모두 끝냈습니다</span>') + "</a>";
     });
     $app.innerHTML = h + "</div>" +
       '<section class="device"><h2>설정</h2><div class="dv-row" id="syncRow"></div><div class="dv-row" id="pushRow"></div></section>';
@@ -400,7 +503,7 @@
   function viewLang(lang) {
     var L = LBY[lang], ds = days(lang), nw = Object.keys(wrongOf(lang)).length;
     var h = '<nav class="crumb"><a href="#/">처음</a> / <span>' + esc(L.ko) + "</span></nav>" +
-      '<section class="hero small"><h1 lang="' + L.tag + '">' + esc(L.name) + '</h1><p class="sub">' + esc(L.ko) + " · 목표 " + esc(L.goal) + "</p></section>";
+      '<section class="hero small lang-hero"><span class="lang-glyph" aria-hidden="true" lang="' + L.tag + '">' + GLYPH[lang] + '</span><h1 lang="' + L.tag + '">' + esc(L.name) + '</h1><p class="sub">' + esc(L.ko) + " · 목표 " + esc(L.goal) + "</p></section>";
     h += '<div class="row-actions"><a class="btn ghost" href="#/' + lang + '/wrong">오답 노트' + (nw ? " (" + nw + ")" : "") + "</a></div>";
     h += '<div class="day-list">';
     ds.forEach(function (d) {
@@ -409,7 +512,9 @@
         var v = g[t[0]], on = !!v, sc = v && v.n ? " " + v.s + "/" + v.n : "";
         return '<span class="pill' + (on ? " on" : "") + '">' + (on ? ICON.check : "") + esc(t[1]) + esc(sc) + "</span>";
       }).join("");
-      h += '<a class="day-card" href="#/' + lang + "/" + d.day + '"><div class="day-head"><span class="day-no">Day ' + d.day + '</span><span class="day-title">' + K(d.title, lang, 0) + "</span></div>" +
+      var dn = dayDone(lang, d);
+      h += '<a class="day-card' + (dn === 6 ? " all-done" : "") + '" href="#/' + lang + "/" + d.day + '"><div class="day-head"><span class="day-no">Day ' + d.day + '</span><span class="day-title">' + K(d.title, lang, 0) + "</span>" +
+        '<span class="day-count" title="끝낸 단계">' + (dn === 6 ? ICON.check + " 완료" : dn + " / 6") + "</span></div>" +
         (d.theme ? '<div class="day-theme">' + K(d.theme, lang, 0) + "</div>" : "") + '<div class="pills">' + st + "</div></a>";
       checksOf(lang).forEach(function (c) { if (c.to === d.day) h += checkCard(lang, c); });
     });
@@ -471,11 +576,16 @@
       var items = [];
       d.words.forEach(function (w, i) {
         var el = document.getElementById("w" + i);
-        items.push({ t: w.say || w.w, v: "F", el: el });
-        if (w.ex && !SET.hideEx) items.push({ t: w.ex, v: "M", el: el });
+        items.push({ t: w.say || w.w, v: "F", el: el, who: (i + 1) + ". " + FL.plain(w.w) });
+        if (w.ex && !SET.hideEx) items.push({ t: w.ex, v: "M", el: el, who: (i + 1) + ". 예문" });
       });
       playSeq(items, lang);
     };
+    // 전체 듣기 중에 단어 칸을 누르면 그 단어부터 이어서
+    pane.querySelector(".words").addEventListener("click", function (e) {
+      var li = e.target.closest(".word"); if (!li || !PL || e.target.closest("[data-say], .w-mean") || selecting()) return;
+      var j = plIndexOf(li); if (j >= 0) plJump(j);
+    });
     pane.querySelector("#stopAll").onclick = stopAudio;
     wireDone(pane, lang, d.day);
   }
@@ -708,23 +818,37 @@
     var h = '<div class="dlg-hd"><h2>' + T(dg.title, lang) + "</h2>" + (dg.scene ? '<p class="sub">' + K(dg.scene, lang) + "</p>" : "") +
       '<div class="cast">' + ids.map(function (id, i) { var c = cast[id]; return '<span class="who s' + i + '">' + T(c.name, lang) + '<small>' + esc(c.ko || "") + " · " + (c.voice.charAt(0) === "M" ? "남" : "여") + "</small></span>"; }).join("") + "</div></div>";
     h += '<div class="toolbar"><button type="button" class="btn sm" id="playAll">' + ICON.play + ' 대화 듣기</button><button type="button" class="btn sm ghost" id="stopAll">' + ICON.stop + ' 멈춤</button>' +
-      '<label class="tgl"><input type="checkbox" id="showTr"' + (SET.tr ? " checked" : "") + "> 해석</label></div>";
+      '<label class="tgl"><input type="checkbox" id="showTr"' + (SET.tr ? " checked" : "") + "> 해석</label></div>" +
+      '<p class="hint">말풍선을 누르면 그 줄부터 이어서 듣습니다(다시 누르면 그 줄을 한 번 더). 스피커 단추는 그 줄만 읽습니다.</p>';
     h += '<ol class="dlg' + (SET.tr ? "" : " no-tr") + '">';
     dg.lines.forEach(function (ln, i) {
       var si = ids.indexOf(ln.s), c = cast[ln.s];
-      h += '<li class="line s' + si + (si % 2 ? " right" : "") + '" id="ln' + i + '"><div class="who-n">' + T(c.name, lang) + '</div><div class="bubble"><div class="ln-t">' + T(ln.t, lang) + spk(ln.t, lang, c.voice) + '</div><div class="ln-k">' + K(ln.k, lang) + "</div></div></li>";
+      h += '<li class="line s' + si + (si % 2 ? " right" : "") + '" id="ln' + i + '" data-ln="' + i + '"><div class="av s' + si + '" aria-hidden="true" lang="' + L.tag + '">' + esc(initial(c.name)) + '</div>' +
+        '<div class="ln-body"><div class="who-n">' + T(c.name, lang) + '</div><div class="bubble" role="button" tabindex="0" title="여기서부터 이어 듣기"><div class="ln-t">' + T(ln.t, lang) + spk(ln.t, lang, c.voice) + '</div><div class="ln-k">' + K(ln.k, lang) + "</div></div></div></li>";
     });
     h += "</ol>";
     if (dg.notes && dg.notes.length) h += '<section class="notes"><h3>표현 정리</h3><dl>' + dg.notes.map(function (n) { return "<dt>" + T(n.t, lang) + "</dt><dd>" + K(n.k, lang) + "</dd>"; }).join("") + "</dl></section>";
     h += doneBtn(lang, d.day, "dialogue");
     pane.innerHTML = h;
     pane.querySelector("#showTr").onchange = function (e) { SET.tr = e.target.checked; saveSet(); pane.querySelector(".dlg").classList.toggle("no-tr", !SET.tr); };
-    pane.querySelector("#playAll").onclick = function () {
-      playSeq(dg.lines.map(function (ln, i) { return { t: ln.t, v: cast[ln.s].voice, el: document.getElementById("ln" + i) }; }), lang);
-    };
+    function items() { return dg.lines.map(function (ln, i) { return { t: ln.t, v: cast[ln.s].voice, el: document.getElementById("ln" + i), who: FL.plain(cast[ln.s].name).split(ACUTE).join("") }; }); }
+    function from(i) {
+      var el = document.getElementById("ln" + i), j = plIndexOf(el);
+      if (j >= 0) plJump(j); else playSeq(items(), lang, i);
+    }
+    pane.querySelector("#playAll").onclick = function () { playSeq(items(), lang, 0); };
     pane.querySelector("#stopAll").onclick = stopAudio;
+    var list = pane.querySelector(".dlg");
+    list.addEventListener("click", function (e) {
+      var li = e.target.closest(".line"); if (!li || e.target.closest("[data-say]") || selecting()) return;
+      from(+li.getAttribute("data-ln"));
+    });
+    list.addEventListener("keydown", function (e) {
+      if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("bubble")) { e.preventDefault(); e.stopPropagation(); from(+e.target.closest(".line").getAttribute("data-ln")); }
+    });
     wireDone(pane, lang, d.day);
   }
+  function initial(name) { return Array.from(FL.plain(name).split(ACUTE).join("").trim())[0] || "?"; }
 
   // ----- 독해 -----
   function paneReading(pane, d, L) {
@@ -752,8 +876,17 @@
     pane.querySelectorAll("[data-pall]").forEach(function (b) {
       b.onclick = function () {
         var ri = +b.getAttribute("data-pall"), r = d.reading[ri];
-        playSeq(r.text.split(/\n\s*\n/).map(function (p, pi) { return { t: p, v: r.voice || "F", el: document.getElementById("p" + ri + "_" + pi) }; }), lang);
+        playSeq(paraItems(ri), lang);
       };
+    });
+    function paraItems(ri) { var r = d.reading[ri], ps = r.text.split(/\n\s*\n/); return ps.map(function (p, pi) { return { t: p, v: r.voice || "F", el: document.getElementById("p" + ri + "_" + pi), who: FL.plain(r.title).split(ACUTE).join("") + " · " + (pi + 1) + "단락" }; }); }
+    // 전체 듣기 중에 단락을 누르면 그 단락부터 이어서
+    pane.querySelectorAll(".passage .para").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        if (!PL || e.target.closest("[data-say]") || selecting()) return;
+        var m = el.id.match(/^p(\d+)_(\d+)$/), j = plIndexOf(el);
+        if (j >= 0) plJump(j); else playSeq(paraItems(+m[1]), lang, +m[2]);
+      });
     });
     pane.querySelectorAll(".stopA").forEach(function (b) { b.onclick = stopAudio; });
     pane.querySelector("#grade").onclick = function () {
