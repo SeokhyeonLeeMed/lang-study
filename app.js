@@ -975,7 +975,8 @@
     var ORD = [];
     d.reading.forEach(function (r, ri) {
       var paras = r.text.split(/\n\s*\n/);
-      h += '<article class="passage"><header><h2>' + T(r.title, lang) + "</h2>" +
+      // 제목은 보이지 않는다(글의 요지를 스스로 파악하게, 2026-11-24 사용자 지시)
+      h += '<article class="passage"><header>' +
         '<button type="button" class="btn sm" data-pall="' + ri + '">' + ICON.play + ' 전체 듣기</button><button type="button" class="btn sm ghost stopA">' + ICON.stop + "</button>" +
         '<span class="count">' + FL.plain(r.text).replace(/\s/g, "").length + (lang === "ru" ? "자" : "자") + " · " + r.qs.length + "문항</span></header>" +
         paras.map(function (p, pi) { return '<p class="para" id="p' + ri + "_" + pi + '">' + T(p, lang) + spk(p, lang, r.voice || "F", "para-spk") + "</p>"; }).join("") + "</article>";
@@ -998,7 +999,7 @@
         playSeq(paraItems(ri), lang);
       };
     });
-    function paraItems(ri) { var r = d.reading[ri], ps = r.text.split(/\n\s*\n/); return ps.map(function (p, pi) { return { t: p, v: r.voice || "F", el: document.getElementById("p" + ri + "_" + pi), who: FL.plain(r.title).split(ACUTE).join("") + " · " + (pi + 1) + "단락" }; }); }
+    function paraItems(ri) { var r = d.reading[ri], ps = r.text.split(/\n\s*\n/); return ps.map(function (p, pi) { return { t: p, v: r.voice || "F", el: document.getElementById("p" + ri + "_" + pi), who: (d.reading.length > 1 ? "지문 " + (ri + 1) : "독해") + " · " + (pi + 1) + "단락" }; }); }
     // 전체 듣기 중에 단락을 누르면 그 단락부터 이어서
     pane.querySelectorAll(".passage .para").forEach(function (el) {
       el.addEventListener("click", function (e) {
@@ -1048,8 +1049,8 @@
   // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
   function passageQs(rr, lang) {
     var L = LBY[lang], hp = L.helper.modes.length - 1, xh = lang === "ja" ? hp : null;   // 일본어 해설은 설정과 상관없이 후리가나
-    var pass = '<div class="passage mini"><h3>' + T(rr.title, lang, 0) + "</h3>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
-    var full = lang === "ja" ? "<h4>" + T(rr.title, lang, hp) + "</h4>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
+    var pass = '<div class="passage mini">' + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
+    var full = lang === "ja" ? rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
     return rr.qs.map(function (rq, qi) {
       var ord = shuffle(rq.o.map(function (_, i) { return i; })), lastQ = qi === rr.qs.length - 1;
       var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang, xh) + "</div>" +

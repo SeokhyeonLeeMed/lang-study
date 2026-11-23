@@ -86,7 +86,9 @@ rt { font-size: .5em; color: var(--rt); font-weight: 400; letter-spacing: 0; use
 .brand { font-weight: 700; color: var(--ink); font-size: 17px; display: inline-flex; align-items: center; gap: 9px; letter-spacing: -.01em; white-space: nowrap; }
 .logo { width: 28px; height: 28px; border-radius: 8px; flex: none; box-shadow: var(--shadow-sm); }
 .logo.big { width: 64px; height: 64px; border-radius: 16px; box-shadow: var(--shadow); }
-.theme-btn { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--ink-2); background: linear-gradient(90deg, var(--ink-2) 50%, transparent 50%); padding: 0; transition: transform .3s; }
+.tb-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.theme-btn { position: relative; flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--ink-2); background: linear-gradient(90deg, var(--ink-2) 50%, transparent 50%); padding: 0; transition: transform .3s; }
+.theme-btn::after { content: ""; position: absolute; inset: -9px -8px; } /* 손가락으로 누르기 쉽게 누르는 범위만 넓힌다 */
 .theme-btn:hover { transform: rotate(180deg); }
 .topnav { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: 13.5px; color: var(--ink-2); box-shadow: var(--shadow-sm); transition: border-color .15s, color .15s; }
@@ -306,7 +308,6 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
 /* 독해 */
 .passage { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 24px; margin: 12px 0 16px; box-shadow: var(--shadow); }
 .passage header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-.passage h2 { margin: 0 8px 0 0; font-size: 20px; }
 .para { font-size: 17px; line-height: 1.95; margin: 0 0 12px; text-indent: 1em; border-radius: 8px; transition: background .2s; }
 .para .spk { opacity: .55; }
 .para.playing { outline: none; background: var(--accent-soft); box-shadow: -10px 0 0 var(--accent-soft), 10px 0 0 var(--accent-soft); }
@@ -314,12 +315,19 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
 .rq { padding-left: 22px; display: grid; gap: 18px; }
 .rq-q { font-weight: 500; margin-bottom: 6px; }
 .rq-o { display: grid; gap: 6px; }
-.ropt { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 9px 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+.ropt { position: relative; display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 9px 12px; cursor: pointer; transition: border-color .15s, background .15s; }
 .ropt:hover { border-color: var(--accent-line); }
-.ropt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
-.ropt input { margin-top: 6px; accent-color: var(--accent); }
+.ropt:has(input:checked):not(.right):not(.bad) { border-color: var(--accent); background: var(--accent-soft); }
+.ropt:has(input:disabled) { cursor: default; }
+/* 라디오는 번호 원 위에 투명하게 겹치고, 고르면 번호 원이 채워진다 */
+.ropt input { position: absolute; left: 12px; top: 12px; width: 22px; height: 22px; margin: 0; opacity: 0; cursor: inherit; }
+.ropt .o-n { transition: background .15s, border-color .15s, color .15s; }
+.ropt input:checked + .o-n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.ropt input:focus-visible + .o-n { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ropt.right { border-color: var(--ok); background: var(--ok-soft); }
 .ropt.bad { border-color: var(--bad); background: var(--bad-soft); }
+.ropt.right .o-n, .ropt.right input:checked + .o-n { background: var(--ok); border-color: var(--ok); color: var(--surface); font-weight: 700; }
+.ropt.bad .o-n, .ropt.bad input:checked + .o-n { background: var(--bad); border-color: var(--bad); color: var(--surface); font-weight: 700; }
 .rq-e { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
 .ev { margin: 8px 0; padding: 8px 12px; background: var(--quote); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; }
 .expl { margin: 8px 0; }
@@ -409,8 +417,6 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
 .ck-g li.ok .ck-m { color: var(--ok); }
 .ck-g li.no .ck-m { color: var(--bad); }
 .passage.mini { padding: 12px 16px; box-shadow: none; margin: 4px 0 12px; background: var(--quote); }
-.passage.mini h3 { margin: 0 0 6px; font-size: 16px; }
-.full-text h4 { margin: 8px 0 4px; font-size: 16px; }
 .full-text .para { margin: 0 0 8px; }
 .passage.mini .para { font-size: 16px; }
 

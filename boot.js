@@ -14,6 +14,15 @@
   function loadScript(src) {
     return new Promise(function (res, rej) { var s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = function () { rej(new Error("load")); }; document.head.appendChild(s); });
   }
+  // 로그인 화면에서도 화면 모드 단추가 듣게 한다(로그인 뒤에는 app.js가 onclick을 이어받는다)
+  (function () {
+    var b = document.getElementById("themeBtn"), o = ["auto", "light", "dark"], names = { auto: "자동", light: "밝게", dark: "어둡게" };
+    if (!b) return;
+    function get() { try { var t = JSON.parse(localStorage.getItem("fl_theme") || '"auto"'); return o.indexOf(t) >= 0 ? t : "auto"; } catch (e) { return "auto"; } }
+    function apply(t) { if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); b.title = "화면: " + names[t]; }
+    b.onclick = function () { var t = o[(o.indexOf(get()) + 1) % 3]; try { localStorage.setItem("fl_theme", JSON.stringify(t)); } catch (e) {} apply(t); };
+    apply(get());
+  })();
   var meta, sb;
   function open(raw, user) {
     return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]).then(function (key) {
