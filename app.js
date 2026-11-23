@@ -73,23 +73,32 @@
     return html.replace(/\n/g, "<br>");
   }
   // 대상 언어 글
+  // helper를 안 주면 설정을 따르는 글: 원문을 data-hs에 두어 설정이 바뀔 때 그 자리에서 글자만 바꾼다(applyHelper)
+  function hsAttr(text, auto) { return auto ? ' data-hs="' + esc(text) + '"' : ""; }
   function T(text, lang, helper) {
-    var L = LBY[lang], h = helper == null ? SET.helper[lang] : helper;
-    return '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '">' + renderBody(text, lang, h) + "</span>";
+    var L = LBY[lang], auto = helper == null, h = auto ? SET.helper[lang] : helper;
+    return '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '"' + hsAttr(text, auto) + ">" + renderBody(text, lang, h) + "</span>";
+  }
+  function applyHelper(lang, root) {
+    var h = SET.helper[lang];
+    (root || document).querySelectorAll("[data-hs]").forEach(function (el) {
+      el.innerHTML = renderBody(el.getAttribute("data-hs"), lang, h);
+      el.classList.toggle("rb", !!h);
+    });
   }
   // 한국어 설명 속에 섞인 대상 언어 글자에 lang을 붙인다
   var RUNS = { ja: /([぀-ヿ㐀-鿿々〆〜ー「」『』（）・]+(?:[぀-ヿ㐀-鿿々〆〜ー「」『』（）・\s]*[぀-ヿ㐀-鿿々〆〜ー」』）])?)/,
     zh: /([㐀-鿿，。？！、“”：；]+)/, ru: /([А-Яа-яЁё́]+(?:[\s,.!?—-]+[А-Яа-яЁё́]+)*[.!?]?)/ };
   function K(text, lang, helper) {
     if (!lang) return esc(text).replace(/\n/g, "<br>");
-    var L = LBY[lang], h = helper == null ? SET.helper[lang] : helper;
+    var L = LBY[lang], auto = helper == null, h = auto ? SET.helper[lang] : helper;
     var out = "";
     segs(text).forEach(function (s) {
-      if (s.r) { out += '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '">' + renderBody("{" + s.b + "|" + s.r + "}", lang, h) + "</span>"; return; }
+      if (s.r) { var src = "{" + s.b + "|" + s.r + "}"; out += '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '"' + hsAttr(src, auto) + ">" + renderBody(src, lang, h) + "</span>"; return; }
       s.b.split(new RegExp(RUNS[lang].source, "g")).forEach(function (p, i) {
         if (!p) return;
         if (i % 2 === 0) out += esc(p).replace(/\n/g, "<br>");
-        else out += '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '">' + renderBody(p, lang, h) + "</span>";
+        else out += '<span lang="' + L.tag + '" class="tl' + (h ? " rb" : "") + '"' + hsAttr(p, auto) + ">" + renderBody(p, lang, h) + "</span>";
       });
     });
     // 강세 끔이면 설명 속 강세도 지운다
@@ -273,7 +282,10 @@
     var sc = document.getElementById("syncChip"); if (sc) chipSync(sc);
     var lb = document.getElementById("lockBtn"); if (lb) lb.onclick = function () { if (confirm("로그아웃할까요? 기록은 서버에 남습니다.")) (SYMETA.dirty ? syncPush() : Promise.resolve()).then(function () { window.FL_LOGOUT(); }); };
     var hb = document.getElementById("helperBtn");
-    if (hb) hb.onclick = function () { var L = LBY[ROUTE.lang]; SET.helper[L.id] = (SET.helper[L.id] + 1) % L.helper.modes.length; saveSet(); rerender(); };
+    if (hb) hb.onclick = function () {
+      var L = LBY[ROUTE.lang]; SET.helper[L.id] = (SET.helper[L.id] + 1) % L.helper.modes.length; saveSet();
+      holdView(function () { applyHelper(L.id); hb.textContent = L.helper.label + " · " + L.helper.modes[SET.helper[L.id]]; });
+    };
     document.getElementById("speedBtn").onclick = function () { var sp = [1, 0.85, 0.7]; SET.speed = sp[(sp.indexOf(SET.speed) + 1) % sp.length]; saveSet(); AU.playbackRate = SET.speed; topControls(); };
   }
   (function theme() {
@@ -282,6 +294,103 @@
     b.onclick = function () { var o = ["auto", "light", "dark"]; save("fl_theme", o[(o.indexOf(load("fl_theme", "auto")) + 1) % 3]); apply(); };
     apply();
   })();
+
+  // ---------- 보던 자리 유지 ----------
+  // 글 높이가 바뀌는 조작(읽기 도움·뜻 가리기·예문·해석) 전후로, 화면 40% 높이에 있던 글자가 같은 자리에 남도록 스크롤을 맞춘다.
+  var BLOCKS = ".word,.line,.para,.gcard,.rqi,.quiz,.passage,.notes,.dlg-hd";
+  function stickBottom() {
+    var b = 0;
+    [".topbar", ".tabs", ".toolbar"].forEach(function (s) {
+      var el = document.querySelector(s); if (!el) return;
+      var r = el.getBoundingClientRect(); if (r.top <= b + 1 && r.bottom > b) b = r.bottom;
+    });
+    return b;
+  }
+  function measureStick() {
+    var q = function (s) { var el = document.querySelector(s); return el ? el.offsetHeight : 0; }, st = document.documentElement.style;
+    var a = q(".topbar"), b = a + q(".tabs"), c = b + q(".toolbar");
+    st.setProperty("--stick-tabs", a + "px"); st.setProperty("--stick-tool", b + "px"); st.setProperty("--stick-all", c + "px");
+  }
+  // 루비(rt)를 뺀 바탕 글자만 센다. 러시아어 강세 표시는 켜고 끌 때 있다 없다 하므로 세지 않는다
+  function baseNodes(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: function (n) { return n.parentNode.closest("rt") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; } }), out = [], n;
+    while ((n = w.nextNode())) out.push(n);
+    return out;
+  }
+  function charMid(range, node, i) {
+    range.setStart(node, i); range.setEnd(node, i + 1);
+    var r = range.getClientRects()[0];
+    return r && r.height ? (r.top + r.bottom) / 2 : null;
+  }
+  function charIndexAt(el, y) {
+    var range = document.createRange(), idx = 0, best = 0, bd = Infinity;
+    baseNodes(el).forEach(function (n) {
+      for (var i = 0; i < n.data.length; i++) {
+        if (n.data.charAt(i) === ACUTE) continue;
+        var m = charMid(range, n, i);
+        if (m != null && Math.abs(m - y) < bd) { bd = Math.abs(m - y); best = idx; }
+        idx++;
+      }
+    });
+    return best;
+  }
+  function charYAt(el, target) {
+    var range = document.createRange(), nodes = baseNodes(el), idx = 0, last = null;
+    for (var k = 0; k < nodes.length; k++) {
+      var n = nodes[k];
+      for (var i = 0; i < n.data.length; i++) {
+        if (n.data.charAt(i) === ACUTE) continue;
+        var m = charMid(range, n, i);
+        if (m != null) last = m;
+        if (idx >= target && m != null) return m;
+        idx++;
+      }
+    }
+    return last;
+  }
+  function viewAnchor() {
+    var top = stickBottom(), bar = PL && document.getElementById("plBar"), bot = window.innerHeight - (bar ? bar.offsetHeight + 16 : 0), y = top + (bot - top) * 0.4;
+    var best = null, bd = Infinity;
+    $app.querySelectorAll(".tl").forEach(function (el) {
+      if (el.closest(".tabs,.toolbar,.crumb")) return;
+      var r = el.getBoundingClientRect();
+      if (!r.height || r.bottom < top || r.top > bot) return;
+      var d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      if (d < bd) { bd = d; best = el; }
+    });
+    var hit = best || document.elementFromPoint(window.innerWidth / 2, y), block = hit && hit.closest ? hit.closest(BLOCKS) : null, a = { block: block, blockTop: block ? block.getBoundingClientRect().top : 0 };
+    if (best) { a.el = best; a.idx = charIndexAt(best, y); a.y = charYAt(best, a.idx); }
+    return best || block ? a : null;
+  }
+  function holdView(change) {
+    var a = viewAnchor();
+    change();
+    measureStick();
+    if (a) {
+      var now = null, was = a.y;
+      if (a.el && a.el.getClientRects().length) now = charYAt(a.el, a.idx);
+      if (now == null && a.block && a.block.getClientRects().length) { now = a.block.getBoundingClientRect().top; was = a.blockTop; }
+      if (now != null && Math.abs(now - was) > 0.5) window.scrollBy(0, now - was);
+    }
+    playLabel();
+  }
+  // 지금 화면에 보이는 첫 줄(전체 듣기를 아래에서 눌러도 맨 위로 끌려가지 않게 그 줄부터 읽는다)
+  function viewIndex(sel) {
+    var els = $app.querySelectorAll(sel), top = stickBottom();
+    for (var i = 0; i < els.length; i++) { var r = els[i].getBoundingClientRect(); if ((r.top + r.bottom) / 2 >= top) return i; }
+    return 0;
+  }
+  function playLabel() {
+    var b = document.getElementById("playAll"); if (!b) return;
+    var s = b.querySelector(".pa-l"), t = viewIndex(b.getAttribute("data-list")) > 0 ? "여기부터 듣기" : b.getAttribute("data-all");
+    if (s.textContent !== t) s.textContent = t;
+  }
+  var labelTick = false;
+  window.addEventListener("scroll", function () {
+    if (labelTick) return; labelTick = true;
+    requestAnimationFrame(function () { labelTick = false; playLabel(); });
+  }, { passive: true });
+  window.addEventListener("resize", function () { measureStick(); playLabel(); });
 
   // ---------- 길 ----------
   function go(h) { if (location.hash === h) route(); else location.hash = h; }
@@ -304,8 +413,10 @@
     else if (ROUTE.check) viewCheck(ROUTE.lang, +p[2]);
     else if (!ROUTE.day) viewLang(ROUTE.lang);
     else viewDay(ROUTE.lang, ROUTE.day, ROUTE.tab);
+    measureStick();
     if (keepScroll) window.scrollTo(0, sy); else window.scrollTo(0, 0);
     keepScroll = false;
+    playLabel();
     nextUpSave();
   }
 
@@ -552,8 +663,8 @@
   // ----- 단어 -----
   function paneWords(pane, d, L) {
     var lang = L.id, hideM = !!SET.hideMean;
-    var h = '<div class="toolbar"><button type="button" class="btn sm" id="playAll">' + ICON.play + ' 전체 듣기</button>' +
-      '<button type="button" class="btn sm ghost" id="stopAll">' + ICON.stop + ' 멈춤</button>' +
+    var h = '<div class="toolbar"><button type="button" class="btn sm" id="playAll" data-list=".word" data-all="전체 듣기">' + ICON.play + ' <span class="pa-l">전체 듣기</span></button>' +
+      '<button type="button" class="btn sm ghost" id="stopAll" aria-label="멈춤" title="멈춤">' + ICON.stop + ' <span class="st-l">멈춤</span></button>' +
       '<label class="tgl"><input type="checkbox" id="hideMean"' + (hideM ? " checked" : "") + '> 뜻 가리기</label>' +
       '<label class="tgl"><input type="checkbox" id="showEx"' + (SET.hideEx ? "" : " checked") + '> 예문</label>' +
       '<span class="count">' + d.words.length + "개</span></div>";
@@ -569,8 +680,8 @@
     });
     h += "</ol>" + doneBtn(L.id, d.day, "words");
     pane.innerHTML = h;
-    pane.querySelector("#hideMean").onchange = function (e) { SET.hideMean = e.target.checked; saveSet(); pane.querySelector(".words").classList.toggle("hide-m", SET.hideMean); };
-    pane.querySelector("#showEx").onchange = function (e) { SET.hideEx = !e.target.checked; saveSet(); pane.querySelector(".words").classList.toggle("hide-ex", SET.hideEx); };
+    pane.querySelector("#hideMean").onchange = function (e) { SET.hideMean = e.target.checked; saveSet(); holdView(function () { pane.querySelector(".words").classList.toggle("hide-m", SET.hideMean); }); };
+    pane.querySelector("#showEx").onchange = function (e) { SET.hideEx = !e.target.checked; saveSet(); holdView(function () { pane.querySelector(".words").classList.toggle("hide-ex", SET.hideEx); }); };
     pane.querySelectorAll(".w-mean").forEach(function (m) { m.onclick = function () { m.classList.toggle("peek"); }; });
     pane.querySelector("#playAll").onclick = function () {
       var items = [];
@@ -579,7 +690,9 @@
         items.push({ t: w.say || w.w, v: "F", el: el, who: (i + 1) + ". " + FL.plain(w.w) });
         if (w.ex && !SET.hideEx) items.push({ t: w.ex, v: "M", el: el, who: (i + 1) + ". 예문" });
       });
-      playSeq(items, lang);
+      var at = document.getElementById("w" + viewIndex(".word")), start = 0;
+      for (var k = 0; k < items.length; k++) if (items[k].el === at) { start = k; break; }
+      playSeq(items, lang, start);
     };
     // 전체 듣기 중에 단어 칸을 누르면 그 단어부터 이어서
     pane.querySelector(".words").addEventListener("click", function (e) {
@@ -686,7 +799,7 @@
     var order = shuffle(idx);
     return {
       lang: lang, instr: L.instr.grammar, prompt: '<div class="q-sent">' + T(gq.q, lang, 0) + "</div>",
-      opts: order.map(function (i) { return T(gq.o[i], lang, hp || 0); }), answer: order.indexOf(gq.a),
+      opts: order.map(function (i) { return T(gq.o[i], lang, hp === "auto" ? null : hp || 0); }), answer: order.indexOf(gq.a),
       after: '<div class="qa-expl"><div class="qa-full">' + T(gq.nb ? gq.o[gq.a] : gq.q.replace(/（\s*）|\(\s*\)|＿+|_{2,}/, gq.o[gq.a]), lang, L.helper.modes.length - 1) + "</div>" +
         (gq.k ? '<div class="ex-k">' + K(gq.k, lang) + "</div>" : "") + '<p class="expl">' + K(gq.e, lang) + "</p>" + (gp ? '<p class="gref">문법: ' + K(gp.p, lang) + " — " + K(gp.m, lang) + "</p>" : "") + "</div>"
     };
@@ -719,7 +832,11 @@
     z.box.querySelectorAll(".opt").forEach(function (b) { b.onclick = function () { answer(+b.getAttribute("data-i")); }; });
     z.box.querySelector("#nextQ").onclick = function () { z.i++; showQ(); };
     if (q.listen) setTimeout(function () { var b = z.box.querySelector(".q-listen .spk"); if (b) b.click(); }, 250);
-    if (!keepScroll) z.box.scrollIntoView({ block: "start" });
+    if (!keepScroll) {
+      // 같은 지문의 다음 문제는 지문을 다시 내려가지 않게 문제부터 보인다(위로 올리면 지문이 그대로 있다)
+      var pv = z.qs[z.i - 1], sameP = q.passage && pv && pv.passage === q.passage;
+      (sameP ? z.box.querySelector(".q-sent") : z.box).scrollIntoView({ block: "start" });
+    }
   }
   function answer(i) {
     var z = QZ; if (!z || z.answered) return;
@@ -739,6 +856,7 @@
     }
     var af = z.box.querySelector(".q-after");
     af.innerHTML = '<div class="verdict ' + (ok ? "ok" : "no") + '">' + (ok ? "정답" : "오답") + "</div>" + (q.after || "");
+    applyHelper(q.lang, af);
     af.hidden = false; z.box.querySelector(".q-next").hidden = false;
     var s = q.autoSay || q.sayAfter;
     if (s) { stopAudio(); playOne(s.t, q.lang, s.v); }
@@ -758,6 +876,7 @@
     }
     h += '<div class="row-actions"><button type="button" class="btn" id="again">다시 풀기</button>' + (z.wrong.length ? '<button type="button" class="btn ghost" id="againWrong">틀린 것만 다시</button>' : "") + "</div></div>";
     z.box.innerHTML = h;
+    if (z.qs[0]) applyHelper(z.qs[0].lang, z.box);
     var opt = z.opt, wrong = z.wrong, box = z.box;
     box.querySelector("#again").onclick = function () { runQuiz(box, opt.make(), opt); };
     var aw = box.querySelector("#againWrong");
@@ -796,7 +915,7 @@
     pane.querySelectorAll(".g-quiz").forEach(function (box) {
       var g = d.grammar[+box.getAttribute("data-g")];
       box.innerHTML = '<div class="gq-h">확인 문제</div>' + g.quiz.map(function (gq, qi) {
-        var q = grammarQ(gq, lang, null, SET.helper[lang]);
+        var q = grammarQ(gq, lang, null, "auto");
         return '<div class="gq" data-q="' + qi + '"><div class="gq-q">' + T(gq.q, lang) + '</div><div class="gq-o">' + q.opts.map(function (o, i) { return '<button type="button" class="opt sm" data-i="' + i + '" data-ok="' + (i === q.answer ? 1 : 0) + '">' + o + "</button>"; }).join("") + '</div><div class="gq-a" hidden>' + q.after + "</div></div>";
       }).join("");
       box.querySelectorAll(".gq").forEach(function (qd) {
@@ -817,7 +936,7 @@
     var lang = L.id, dg = d.dialogue, cast = dg.cast, ids = Object.keys(cast);
     var h = '<div class="dlg-hd"><h2>' + T(dg.title, lang) + "</h2>" + (dg.scene ? '<p class="sub">' + K(dg.scene, lang) + "</p>" : "") +
       '<div class="cast">' + ids.map(function (id, i) { var c = cast[id]; return '<span class="who s' + i + '">' + T(c.name, lang) + '<small>' + esc(c.ko || "") + " · " + (c.voice.charAt(0) === "M" ? "남" : "여") + "</small></span>"; }).join("") + "</div></div>";
-    h += '<div class="toolbar"><button type="button" class="btn sm" id="playAll">' + ICON.play + ' 대화 듣기</button><button type="button" class="btn sm ghost" id="stopAll">' + ICON.stop + ' 멈춤</button>' +
+    h += '<div class="toolbar"><button type="button" class="btn sm" id="playAll" data-list=".line" data-all="대화 듣기">' + ICON.play + ' <span class="pa-l">대화 듣기</span></button><button type="button" class="btn sm ghost" id="stopAll" aria-label="멈춤" title="멈춤">' + ICON.stop + ' <span class="st-l">멈춤</span></button>' +
       '<label class="tgl"><input type="checkbox" id="showTr"' + (SET.tr ? " checked" : "") + "> 해석</label></div>" +
       '<p class="hint">말풍선을 누르면 그 줄부터 이어서 듣습니다(다시 누르면 그 줄을 한 번 더). 스피커 단추는 그 줄만 읽습니다.</p>';
     h += '<ol class="dlg' + (SET.tr ? "" : " no-tr") + '">';
@@ -830,13 +949,13 @@
     if (dg.notes && dg.notes.length) h += '<section class="notes"><h3>표현 정리</h3><dl>' + dg.notes.map(function (n) { return "<dt>" + T(n.t, lang) + "</dt><dd>" + K(n.k, lang) + "</dd>"; }).join("") + "</dl></section>";
     h += doneBtn(lang, d.day, "dialogue");
     pane.innerHTML = h;
-    pane.querySelector("#showTr").onchange = function (e) { SET.tr = e.target.checked; saveSet(); pane.querySelector(".dlg").classList.toggle("no-tr", !SET.tr); };
+    pane.querySelector("#showTr").onchange = function (e) { SET.tr = e.target.checked; saveSet(); holdView(function () { pane.querySelector(".dlg").classList.toggle("no-tr", !SET.tr); }); };
     function items() { return dg.lines.map(function (ln, i) { return { t: ln.t, v: cast[ln.s].voice, el: document.getElementById("ln" + i), who: FL.plain(cast[ln.s].name).split(ACUTE).join("") }; }); }
     function from(i) {
       var el = document.getElementById("ln" + i), j = plIndexOf(el);
       if (j >= 0) plJump(j); else playSeq(items(), lang, i);
     }
-    pane.querySelector("#playAll").onclick = function () { playSeq(items(), lang, 0); };
+    pane.querySelector("#playAll").onclick = function () { playSeq(items(), lang, viewIndex(".line")); };
     pane.querySelector("#stopAll").onclick = stopAudio;
     var list = pane.querySelector(".dlg");
     list.addEventListener("click", function (e) {
@@ -901,7 +1020,7 @@
           if (x === q.a) lab.classList.add("right"); else if (x === v) lab.classList.add("bad");
         });
         var e = '<div class="verdict ' + (ok ? "ok" : "no") + '">' + (ok ? "정답" : (v < 0 ? "답하지 않음" : "오답")) + "</div>";
-        if (q.ev) e += '<blockquote class="ev">' + T(q.ev, lang, SET.helper[lang]) + "</blockquote>";
+        if (q.ev) e += '<blockquote class="ev">' + T(q.ev, lang) + "</blockquote>";
         e += '<div class="expl">' + K(q.e, lang) + "</div>";
         if (q.oe) e += '<ul class="oe">' + ORD[oi].map(function (k, j) { return '<li class="' + (k === q.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(q.o[k], lang) + '<div class="oe-t">' + K(q.oe[k], lang) + "</div></div></li>"; }).join("") + "</ul>";
         var box = li.querySelector(".rq-e"); box.innerHTML = e; box.hidden = false; oi++;
@@ -928,14 +1047,17 @@
   }
   // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
   function passageQs(rr, lang) {
-    var L = LBY[lang], hp = L.helper.modes.length - 1;
+    var L = LBY[lang], hp = L.helper.modes.length - 1, xh = lang === "ja" ? hp : null;   // 일본어 해설은 설정과 상관없이 후리가나
     var pass = '<div class="passage mini"><h3>' + T(rr.title, lang, 0) + "</h3>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
+    var full = lang === "ja" ? "<h4>" + T(rr.title, lang, hp) + "</h4>" + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
     return rr.qs.map(function (rq, qi) {
-      var ord = shuffle(rq.o.map(function (_, i) { return i; }));
-      var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang) + "</div>" +
-        (rq.oe ? '<ul class="oe">' + ord.map(function (k, j) { return '<li class="' + (k === rq.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(rq.o[k], lang) + '<div class="oe-t">' + K(rq.oe[k], lang) + "</div></div></li>"; }).join("") + "</ul>" : "") +
+      var ord = shuffle(rq.o.map(function (_, i) { return i; })), lastQ = qi === rr.qs.length - 1;
+      var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang, xh) + "</div>" +
+        (rq.oe ? '<ul class="oe">' + ord.map(function (k, j) { return '<li class="' + (k === rq.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(rq.o[k], lang, xh) + '<div class="oe-t">' + K(rq.oe[k], lang, xh) + "</div></div></li>"; }).join("") + "</ul>" : "") +
+        // 전문: 마지막 문제에서는 펼치고, 앞 문제에서는 접는다(남은 문제의 후리가나가 미리 보이지 않게)
+        (full ? '<details class="trans full-text"' + (lastQ ? " open" : "") + "><summary>전문 (후리가나)</summary><div>" + full + "</div></details>" : "") +
         (qi === rr.qs.length - 1 && rr.k ? '<details class="trans"><summary>전문 해석</summary><div>' + K(rr.k, lang) + "</div></details>" : "") + "</div>";
-      return { lang: lang, tag: "독해", instr: L.instr.reading, fixed: true, prompt: pass + '<div class="q-sent">' + T(rq.q, lang, 0) + "</div>",
+      return { lang: lang, tag: "독해", passage: rr, instr: L.instr.reading, fixed: true, prompt: pass +'<div class="q-sent">' + T(rq.q, lang, 0) + "</div>",
         opts: ord.map(function (k) { return T(rq.o[k], lang, 0); }), answer: ord.indexOf(rq.a), after: af };
     });
   }
