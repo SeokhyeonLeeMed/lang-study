@@ -713,6 +713,7 @@
         (w.pos ? '<span class="w-pos">' + esc(w.pos) + "</span>" : "") + "</div>" +
         '<div class="w-mean" tabindex="0">' + K(w.m, lang) + "</div>" +
         (w.note ? '<div class="w-note">' + K(w.note, lang) + "</div>" : "") +
+        declRow(L, w.w, d.day) +
         (w.ex ? '<div class="w-ex"><div class="ex-t">' + T(w.ex, lang) + spk(w.ex, lang, "M") + '</div><div class="ex-k">' + K(w.exk, lang) + "</div></div>" : "") +
         "</li>";
     });
@@ -967,6 +968,17 @@
   }
 
   // ----- 문법 -----
+  // 단어 카드의 격 변화(러시아어 명사·인칭대명사). 그날까지 배운 격은 진하게, 아직 안 배운 격은 흐리게
+  function declRow(L, word, day) {
+    if (!L.decl || !(word in L.decl)) return "";
+    var f = L.decl[word];
+    if (!f) return '<div class="w-decl"><span class="dc-l">격 변화</span><span class="dc-none">형태가 바뀌지 않습니다</span></div>';
+    var learned = {};
+    (L.cases || []).forEach(function (c, i) { if (c.learn.some(function (x) { return x.day <= day; })) learned[i] = 1; });
+    return '<div class="w-decl"><span class="dc-l">격 변화</span>' + L.cases.map(function (c, i) {
+      return '<span class="dc' + (learned[i] ? "" : " later") + '"><small>' + esc(c.n.replace(/격$/, "")) + "</small>" + T(f[i], L.id) + "</span>";
+    }).join("") + "</div>";
+  }
   // 격 정리표: 6격 전체를 보이되, 그날까지 배운 줄만 채운다(러시아어 Day 2부터)
   function caseBox(L, day) {
     var lang = L.id;

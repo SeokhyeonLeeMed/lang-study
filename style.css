@@ -223,6 +223,12 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
 .hide-m .w-mean:not(.peek), .hide-m .w-mean:not(.peek) * { color: transparent; text-shadow: 0 0 9px var(--ink), 0 0 9px var(--ink); }
 .hide-m .w-ex .ex-k { display: none; }
 .hide-ex .w-ex { display: none; }
+.w-decl { margin: 7px 0 0 28px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; font-size: 15px; }
+.dc-l { font-size: 12px; color: var(--ink-3); margin-right: 2px; }
+.dc { display: inline-flex; gap: 4px; align-items: baseline; padding: 1px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.dc small { font-size: 11px; color: var(--accent); }
+.dc.later { opacity: .55; }
+.dc-none { font-size: 13.5px; color: var(--ink-2); }
 .done-row { margin: 26px 0 6px; text-align: center; }
 .done-row .btn { padding: 10px 26px; }
 
@@ -442,7 +448,7 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
   .hero.home { gap: 14px; margin: 16px 0 20px; }
   .hero.home .logo.big { width: 52px; height: 52px; border-radius: 13px; }
   .hero h1 { font-size: 26px; }
-  .w-mean, .w-note, .w-ex { margin-left: 0; }
+  .w-mean, .w-note, .w-ex, .w-decl { margin-left: 0; }
   .line { max-width: 100%; gap: 8px; }
   .av { width: 30px; height: 30px; font-size: 13px; }
   .passage { padding: 14px 16px; }
