@@ -158,8 +158,8 @@
     var it = P.items[P.i], my = P.my;
     P.waiting = false; P.paused = false;
     markPlaying(it.el || null);
-    if (it.el && it.el.scrollIntoView) it.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     plUI();
+    plFollow(it.el);
     playOne(it.t, P.lang, it.v).then(function () {
       if (PL !== P || P.my !== my) return;
       setTimeout(function () {
@@ -169,6 +169,33 @@
       }, 380);
     });
   }
+  // 읽는 줄을 위 고정 막대와 아래 재생 막대 사이로 데려온다.
+  // 기기마다 다른 부드러운 scrollIntoView에 맡기지 않고 직접 계산해 옮긴다(2026-11-24, iPad에서 안 따라옴).
+  var followId = 0;
+  function plFollow(el) {
+    if (!el) return;
+    var my = ++followId, calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function gap() {
+      var r = el.getBoundingClientRect(), vv = window.visualViewport, bar = document.getElementById("plBar");
+      var top = stickBottom() + 8, bottom = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;
+      if (bar && !bar.hidden) bottom = Math.min(bottom, bar.getBoundingClientRect().top - 8);
+      if (r.top < top || r.height > bottom - top) return r.top - top;
+      return r.bottom > bottom ? r.bottom - bottom : 0;
+    }
+    function land() { if (my === followId && el.isConnected) { var d = gap(); if (Math.abs(d) >= 1) window.scrollBy(0, d); } }
+    var d0 = gap(); if (Math.abs(d0) < 1) return;
+    if (calm) return land();
+    var y0 = window.pageYOffset, t0 = performance.now(), MS = 240;
+    (function step(now) {
+      if (my !== followId || !el.isConnected) return;
+      var k = Math.min(1, ((now || performance.now()) - t0) / MS);
+      window.scrollTo(0, y0 + d0 * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) requestAnimationFrame(step);
+    })();
+    // 화면 갱신이 느리거나(저전력 모드) 관성 스크롤에 밀려도 반드시 제자리에 도착하게 한다
+    setTimeout(land, MS + 60); setTimeout(land, MS + 360);
+  }
+  ["touchstart", "wheel"].forEach(function (t) { window.addEventListener(t, function () { followId++; }, { passive: true }); });
   // j번 줄부터 다시(같은 줄을 누르면 그 줄을 한 번 더)
   function plJump(j) {
     var P = PL; if (!P) return;
@@ -262,6 +289,17 @@
   };
 
   document.addEventListener("click", function (e) {
+    var tb = e.target.closest("[data-talk]");
+    if (tb) {   // 듣기 이해: 대화 전체를 화자별 목소리로 이어서 읽는다
+      var tk = SAY[+tb.getAttribute("data-talk")]; if (!tk) return;
+      stopAudio(); var tmy = ++seqId; markPlaying(tb);
+      (function next(i) {
+        if (tmy !== seqId) return;
+        if (i >= tk.lines.length) { markPlaying(null); return; }
+        playOne(tk.lines[i].t, tk.lang, tk.lines[i].v).then(function () { if (tmy === seqId) setTimeout(function () { next(i + 1); }, 320); });
+      })(0);
+      return;
+    }
     var b = e.target.closest("[data-say]");
     if (b) { var s = SAY[+b.getAttribute("data-say")]; if (s) { stopAudio(); var my = ++seqId; markPlaying(b); playOne(s.t, s.lang, s.v).then(function () { if (my === seqId) markPlaying(null); }); } }
   });
@@ -754,6 +792,31 @@
     shuffle(cands).forEach(function (c) { if (out.length < n && c && !seen[c]) { seen[c] = 1; out.push(c); } });
     return out;
   }
+  // 단어 듣기 오답: 소리가 비슷하고 품사가 같은 단어의 뜻을 앞세운다(2026-11-24 사용자 지시)
+  function soundOf(w, lang) {
+    if (lang === "ja") return jaReading(w.w);
+    if (lang === "zh") return zhSyl(w.w).join("").normalize("NFD").replace(/[̀-ͯ\d\s]/g, "").toLowerCase();
+    return FL.plain(w.say || w.w).split(ACUTE).join("").toLowerCase();
+  }
+  function soundSim(a, b) {
+    function bi(s) { var c = Array.from(s), o = {}; if (c.length < 2) o[s] = 1; for (var i = 0; i < c.length - 1; i++) o[c[i] + c[i + 1]] = 1; return o; }
+    var x = bi(a), y = bi(b), n = 0, kx = Object.keys(x), ky = Object.keys(y);
+    kx.forEach(function (k) { if (y[k]) n++; });
+    var head = Array.from(a)[0] === Array.from(b)[0] ? 0.25 : 0, tail = Array.from(a).pop() === Array.from(b).pop() ? 0.15 : 0;
+    return 2 * n / (kx.length + ky.length || 1) + head + tail;
+  }
+  function listenWrongs(w, lang, pool) {
+    function parts(m) { return String(m).split(/[,，·;；\/]\s*/).map(function (s) { return s.trim(); }).filter(Boolean); }
+    var mine = parts(w.m), snd = soundOf(w, lang), seen = {};
+    var scored = pool.filter(function (x) {
+      if (x.w === w || !x.w.m || seen[x.w.m]) return false;
+      seen[x.w.m] = 1;
+      return !parts(x.w.m).some(function (p) { return mine.indexOf(p) >= 0; });   // 뜻이 겹치면 정답이 둘이 된다
+    }).map(function (x) {
+      return { m: x.w.m, s: soundSim(snd, soundOf(x.w, lang)) * 6 + ((x.w.pos || "") === (w.pos || "") ? 2 : 0) + (Math.abs(String(x.w.m).length - String(w.m).length) <= 3 ? 0.5 : 0) + Math.random() * 0.6 };
+    }).sort(function (a, b) { return b.s - a.s; });
+    return shuffle(scored.slice(0, 7)).slice(0, 3).map(function (x) { return x.m; });
+  }
   function wordQ(item, lang, type) {
     var L = LBY[lang], w = item.w, pool = allWords(lang);
     var near = pool.filter(function (x) { return x.w !== w && (x.w.pos || "") === (w.pos || ""); });
@@ -776,7 +839,7 @@
     } else if (type === "listen") {
       q.instr = L.instr.listen; q.listen = { t: w.say || w.w, v: "F" };
       q.prompt = '<div class="q-listen">' + spk(w.say || w.w, lang, "F", "big") + "</div>";
-      q.opts = [w.m].concat(distract(w.m, mOpts(), 3)).map(function (x) { return K(x, lang, 0); });
+      q.opts = [w.m].concat(listenWrongs(w, lang, pool)).map(function (x) { return K(x, lang, 0); });
       q.autoSay = null;
     } else {
       q.instr = L.instr.word; q.prompt = '<div class="q-word">' + T(w.w, lang, 0) + "</div>";
@@ -816,6 +879,7 @@
     var q = z.qs[z.i];
     if (!q) return finishQuiz();
     SAY = SAY.slice(0); // 유지
+    stopAudio();   // 앞 문제의 대화가 다음 문제까지 이어지지 않게
     z.answered = false;
     var h = '<div class="quiz"><div class="q-top"><span class="q-n">' + (z.i + 1) + " / " + z.qs.length + '</span><span class="q-score">맞음 ' + z.score + '</span></div>' +
       '<div class="q-bar"><i style="width:' + Math.round(z.i / z.qs.length * 100) + '%"></i></div>' +
@@ -831,7 +895,9 @@
     }
     z.box.querySelectorAll(".opt").forEach(function (b) { b.onclick = function () { answer(+b.getAttribute("data-i")); }; });
     z.box.querySelector("#nextQ").onclick = function () { z.i++; showQ(); };
-    if (q.listen) setTimeout(function () { var b = z.box.querySelector(".q-listen .spk"); if (b) b.click(); }, 250);
+    // 자동 재생 예약은 이 문제에서만(빨리 넘기면 앞 문제의 예약이 다음 문제 소리를 한 번 더 틀던 문제)
+    var qi = z.i;
+    if (q.listen) setTimeout(function () { if (QZ !== z || z.i !== qi) return; var b = z.box.querySelector(".q-listen .spk"); if (b) b.click(); }, 250);
     if (!keepScroll) {
       // 같은 지문의 다음 문제는 지문을 다시 내려가지 않게 문제부터 보인다(위로 올리면 지문이 그대로 있다)
       var pv = z.qs[z.i - 1], sameP = q.passage && pv && pv.passage === q.passage;
@@ -901,8 +967,20 @@
   }
 
   // ----- 문법 -----
+  // 격 정리표: 6격 전체를 보이되, 그날까지 배운 줄만 채운다(러시아어 Day 2부터)
+  function caseBox(L, day) {
+    var lang = L.id;
+    return '<details class="cases" open><summary>격 정리 — Day ' + day + "까지</summary>" +
+      '<p class="hint">러시아어 명사·대명사는 문장 속 역할에 따라 끝이 바뀝니다. 이것을 격이라 하고 모두 6개입니다. 지금까지 배운 것만 채워 두었습니다.</p><ol class="case-l">' +
+      L.cases.map(function (c) {
+        var got = c.learn.filter(function (x) { return x.day <= day; });
+        return '<li class="case' + (got.length ? "" : " later") + '"><div class="case-h"><b>' + esc(c.n) + '</b><span lang="ru">' + T(c.ru, lang) + '</span><span class="case-q" lang="ru">' + T(c.ask, lang) + "</span></div>" +
+          '<div class="case-u">' + K(c.use, lang) + "</div>" +
+          (got.length ? got.map(function (x) { return '<div class="case-f"><span class="case-d">Day ' + x.day + "</span>" + K(x.t, lang) + '<div class="ex-t">' + T(x.ex, lang) + spk(x.ex, lang, "F") + "</div></div>"; }).join("") : '<div class="case-f muted">아직 배우지 않았습니다.</div>') + "</li>";
+      }).join("") + "</ol></details>";
+  }
   function paneGrammar(pane, d, L) {
-    var lang = L.id, h = "";
+    var lang = L.id, h = L.cases && d.day >= 2 ? caseBox(L, d.day) : "";
     d.grammar.forEach(function (g, gi) {
       h += '<article class="gcard"><header><span class="g-no">' + (gi + 1) + '</span><h2>' + T(g.p, lang) + '</h2></header><div class="g-mean">' + K(g.m, lang) + "</div>" +
         (g.form ? '<div class="g-form"><span class="lbl">접속</span>' + K(g.form, lang) + "</div>" : "") +
@@ -1046,18 +1124,33 @@
       opts: x.o.map(function (o) { return K(o, lang, 0); }), answer: x.a || 0,
       after: '<div class="qa-expl"><div class="qa-full">' + T(x.t, lang, L.helper.modes.length - 1) + "</div>" + (x.e ? '<p class="expl">' + K(x.e, lang) + "</p>" : "") + "</div>" };
   }
+  // 듣기 이해: 대화를 듣고 내용을 묻는 문제({ lines:[{v,t,k}], q, o, a, e }). 대본은 답한 뒤에 보인다
+  var TALK_INSTR = { ja: "会話を聞いて、問いに対する答えとして最もよいものを選びなさい。", zh: "听对话，回答问题。 (대화를 듣고 답하기)", ru: "Послушайте диалог и ответьте на вопрос. (대화를 듣고 답하기)" };
+  function talkQ(x, lang) {
+    var L = LBY[lang], hp = L.helper.modes.length - 1, ord = shuffle(x.o.map(function (_, i) { return i; }));
+    SAY.push({ lines: x.lines, lang: lang });
+    return { lang: lang, tag: "듣기 이해", instr: TALK_INSTR[lang], listen: { lines: x.lines }, fixed: true,
+      prompt: '<div class="q-listen"><button type="button" class="spk big" data-talk="' + (SAY.length - 1) + '" aria-label="대화 듣기" title="대화 듣기">' + ICON.spk + '</button></div><div class="q-sent">' + T(x.q, lang, 0) + "</div>",
+      opts: ord.map(function (k) { return T(x.o[k], lang, 0); }), answer: ord.indexOf(x.a),
+      after: '<div class="qa-expl"><div class="talk-t">' + x.lines.map(function (l) { return '<div class="talk-l"><div class="qa-full">' + T(l.t, lang, hp) + '</div><div class="ex-k">' + K(l.k, lang) + "</div></div>"; }).join("") + '</div><p class="expl">' + K(x.e, lang) + "</p></div>" };
+  }
   // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
   function passageQs(rr, lang) {
     var L = LBY[lang], hp = L.helper.modes.length - 1, xh = lang === "ja" ? hp : null;   // 일본어 해설은 설정과 상관없이 후리가나
     var pass = '<div class="passage mini">' + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
-    var full = lang === "ja" ? rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
+    var paras = rr.text.split(/\n\s*\n/), ks = rr.k ? rr.k.split(/\n\s*\n/) : [];
+    var full = lang === "ja" ? paras.map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
+    // 전문 해석: 읽기 도움을 단 원문과 해석을 단락마다 나란히(단락 수가 다르면 원문 전체 뒤에 해석)
+    var both = paras.length === ks.length
+      ? paras.map(function (p, i) { return '<p class="para">' + T(p, lang, hp) + '</p><p class="ft-k">' + K(ks[i], lang) + "</p>"; }).join("")
+      : paras.map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") + (rr.k ? '<div class="ft-k">' + K(rr.k, lang) + "</div>" : "");
     return rr.qs.map(function (rq, qi) {
       var ord = shuffle(rq.o.map(function (_, i) { return i; })), lastQ = qi === rr.qs.length - 1;
       var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang, xh) + "</div>" +
         (rq.oe ? '<ul class="oe">' + ord.map(function (k, j) { return '<li class="' + (k === rq.a ? "right" : "") + '"><span class="o-n">' + (j + 1) + "</span><div>" + T(rq.o[k], lang, xh) + '<div class="oe-t">' + K(rq.oe[k], lang, xh) + "</div></div></li>"; }).join("") + "</ul>" : "") +
         // 전문: 마지막 문제에서는 펼치고, 앞 문제에서는 접는다(남은 문제의 후리가나가 미리 보이지 않게)
-        (full ? '<details class="trans full-text"' + (lastQ ? " open" : "") + "><summary>전문 (후리가나)</summary><div>" + full + "</div></details>" : "") +
-        (qi === rr.qs.length - 1 && rr.k ? '<details class="trans"><summary>전문 해석</summary><div>' + K(rr.k, lang) + "</div></details>" : "") + "</div>";
+        (lastQ ? '<details class="trans full-text" open><summary>전문 해석 (' + esc(L.helper.label) + ")</summary><div>" + both + "</div></details>"
+          : full ? '<details class="trans full-text"><summary>전문 (후리가나)</summary><div>' + full + "</div></details>" : "") + "</div>";
       return { lang: lang, tag: "독해", passage: rr, instr: L.instr.reading, fixed: true, prompt: pass +'<div class="q-sent">' + T(rq.q, lang, 0) + "</div>",
         opts: ord.map(function (k) { return T(rq.o[k], lang, 0); }), answer: ord.indexOf(rq.a), after: af };
     });
@@ -1075,6 +1168,7 @@
       var rv = d.review || {};
       if (rv.grammar) rv.grammar.forEach(function (gq) { var q = grammarQ(gq, lang, d.grammar[gq.g]); q.tag = "문법"; q.fixed = true; qs.push(q); });
       else d.grammar.forEach(function (g) { (g.quiz || []).forEach(function (gq) { var q = grammarQ(gq, lang, g); q.tag = "문법"; q.fixed = true; qs.push(q); }); });
+      if (rv.talk) rv.talk.forEach(function (x) { qs.push(talkQ(x, lang)); });
       if (rv.listen) rv.listen.forEach(function (x) { qs.push(listenQ(x, lang)); });
       else pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2).forEach(function (ln) { qs.push(dialogQ(d, ln, lang)); });
       qs = shuffle(qs);
@@ -1082,7 +1176,7 @@
       if (d.review && d.review.reading) qs = qs.concat(passageQs(d.review.reading, lang));
       return qs;
     }
-    var rv0 = d.review || {}, nG = rv0.grammar ? rv0.grammar.length : d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0), nL = rv0.listen ? rv0.listen.length : 2;
+    var rv0 = d.review || {}, nG = rv0.grammar ? rv0.grammar.length : d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0), nL = (rv0.listen ? rv0.listen.length : 2) + (rv0.talk ? rv0.talk.length : 0);
     var nR = d.review && d.review.reading ? d.review.reading.qs.length : 0;
     startScreen(pane, "정리 테스트", "단어 10문항(오늘 단어와 지난 날 단어에서 무작위), 문법 " + nG + "문항, 듣기 " + nL + "문항" + (nR ? ", 독해 " + nR + "문항" : "") + ". 문법·듣기·독해는 학습 화면에 나오지 않은 새 문장입니다. 읽기 도움은 보이지 않습니다.", prog(lang, d.day).review, function () {
       runQuiz(pane, make(), { make: make, onDone: function (s, n) { prog(lang, d.day).review = { s: s, n: n, t: Date.now() }; saveProg(); } });
@@ -1104,7 +1198,7 @@
     var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>종합 점검 " + no + "</span></nav>";
     if (!c) { $app.innerHTML = h + '<p class="empty">없는 점검입니다.</p>'; return; }
     var ds = days(lang).filter(function (d) { return d.day >= c.from && d.day <= c.to; });
-    var per = lang === "ja" ? 5 : 4, nW = per * ds.length, nD = c.listen ? c.listen.length : Math.min(3, ds.length);
+    var per = lang === "ja" ? 5 : 4, nW = per * ds.length, nD = (c.listen ? c.listen.length : Math.min(3, ds.length)) + (c.talk ? c.talk.length : 0);
     function make() {
       var qs = [];
       ds.forEach(function (d) {
@@ -1114,6 +1208,7 @@
         var r = gq.ref.split("."), d = dayOf(lang, +r[0]), gp = d && d.grammar[+r[1]];
         var q = grammarQ(gq, lang, gp); q.tag = "문법"; q.fixed = true; q.key = "g:" + gq.ref; q.ty = "grammar"; qs.push(q);
       });
+      (c.talk || []).forEach(function (x, i) { var q = talkQ(x, lang); q.key = "t:" + i; q.ty = "talk"; qs.push(q); });
       if (c.listen) c.listen.forEach(function (x, i) { var q = listenQ(x, lang); q.key = "l:" + i; q.ty = "listen-s"; qs.push(q); });
       else pick(ds, nD).forEach(function (d) {
         var ln = pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 1)[0];
@@ -1144,7 +1239,7 @@
       var p = x.k.split(":");
       if (p[0] === "w") add("단어 · Day " + p[1], x.ok);
       else if (p[0] === "g") gram.push(x);
-      else if (p[0] === "d" || p[0] === "l") add("듣기", x.ok);
+      else if (p[0] === "d" || p[0] === "l" || p[0] === "t") add("듣기", x.ok);
       else if (p[0] === "r") add("독해", x.ok);
     });
     order.sort(function (a, b) { return (a.indexOf("단어") === 0 ? 0 : 1) - (b.indexOf("단어") === 0 ? 0 : 1) || a.localeCompare(b); });
