@@ -28,7 +28,7 @@
     return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]).then(function (key) {
       return getBin("d.bin?v=" + meta.v).then(function (buf) { return decrypt(key, buf); }).then(gunzip).then(function (txt) {
         var d = JSON.parse(txt);
-        window.FL_LANGS = d.langs; window.FL_BANK = d.bank; window.FL_CHECKS = d.checks || []; window.FL_REPORTS = d.reports || [];
+        window.FL_LANGS = d.langs; window.FL_BANK = d.bank; window.FL_CHECKS = d.checks || []; window.FL_REPORTS = d.reports || []; window.FL_SOUNDS = d.sounds || [];
         window.FL_SYNC = meta.sync; window.FL_SB = sb; window.FL_USER = user;
         var cache = {};
         window.FL_AUDIO_URL = function (path) {
