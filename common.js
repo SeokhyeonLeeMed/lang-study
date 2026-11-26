@@ -136,7 +136,9 @@
 
   // ---- 중국어 병음: 경성 단어는 사전에 넣는다 ----
   var ZH_CUSTOM = {
-    "有点儿": "yǒu diǎnr", "点儿": "diǎnr", "学校": "xué xiào", "说得": "shuō de", "只想": "zhǐ xiǎng",
+    "有点儿": "yǒu diǎnr", "点儿": "diǎnr", "裤子": "kù zi", "得先": "děi xiān", "怪不得": "guài bu de",
+    "跑得": "pǎo de", "睡得": "shuì de", "吃得": "chī de", "游得": "yóu de", "弹得": "tán de", "做得": "zuò de", "唱得": "chàng de",
+    "住得": "zhù de", "跳得": "tiào de", "写得": "xiě de", "学得": "xué de", "休息得": "xiū xi de", "进步得": "jìn bù de", "倒热水": "dào rè shuǐ", "学校": "xué xiào", "说得": "shuō de", "只想": "zhǐ xiǎng",
     "谢谢": "xiè xie", "朋友": "péng you", "东西": "dōng xi", "学生": "xué sheng", "先生": "xiān sheng", "喜欢": "xǐ huan",
     "名字": "míng zi", "衣服": "yī fu", "时候": "shí hou", "认识": "rèn shi", "知道": "zhī dao", "告诉": "gào su",
     "地方": "dì fang", "客气": "kè qi", "漂亮": "piào liang", "舒服": "shū fu", "明白": "míng bai", "意思": "yì si",
@@ -178,6 +180,7 @@
   function zhPinyin(text) {
     if (!zhInit()) return Array.from(text).map(function (c) { return { c: c, p: "" }; });
     if (text === "了") return [{ c: "了", p: "le" }]; // 설명 속에 홀로 쓴 了는 조사
+    if (text === "得") return [{ c: "得", p: "de" }]; // 설명·선지에 홀로 쓴 得는 구조조사(정도보어)
     var arr = G.pinyinPro.pinyin(text, { type: "all", toneSandhi: true });
     var out = [];
     for (var i = 0; i < arr.length; i++) out.push({ c: arr[i].origin, p: arr[i].isZh ? arr[i].pinyin : "" });

@@ -459,3 +459,19 @@ main { max-width: 860px; margin: 0 auto; padding: 18px 16px 120px; }
   .pl-bar { padding-left: 12px; grid-template-columns: 1fr; }
   .pl-btns { justify-content: space-between; }
 }
+
+/* 5일 리포트: 장식 없이 선과 여백으로(카드·그림자 없음) */
+.report-link { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; padding: 10px 2px; margin: 2px 0 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.report-link:hover .rl-t { text-decoration: underline; }
+.rl-t { font-weight: 700; font-size: 15px; }
+.rl-s { color: var(--ink-3); font-size: 13.5px; }
+.report { max-width: 760px; }
+.report h1 { font-size: 24px; margin: 6px 0 4px; letter-spacing: -.01em; }
+.rp-meta { color: var(--ink-3); font-size: 13.5px; margin: 0 0 18px; }
+.report section { border-top: 1px solid var(--line); padding: 14px 0 6px; }
+.report h2 { font-size: 17px; margin: 0 0 8px; }
+.report p { margin: 0 0 10px; line-height: 1.75; }
+.rp-t { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 4px 0 14px; }
+.rp-t th { text-align: left; font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--line-2); padding: 6px 10px 6px 0; white-space: nowrap; }
+.rp-t td { border-bottom: 1px solid var(--line); padding: 7px 10px 7px 0; vertical-align: top; }
+@media (max-width: 560px) { .rp-t { font-size: 13.5px; } .rp-t th, .rp-t td { padding-right: 6px; } }

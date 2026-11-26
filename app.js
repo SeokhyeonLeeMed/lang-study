@@ -442,6 +442,7 @@
     ROUTE.lang = LBY[p[0]] ? p[0] : null;
     ROUTE.day = ROUTE.lang && p[1] && /^\d+$/.test(p[1]) ? +p[1] : null;
     ROUTE.check = !!(ROUTE.lang && p[1] === "check");
+    ROUTE.report = !!(ROUTE.lang && p[1] === "report");
     ROUTE.tab = ROUTE.day ? (TABS.some(function (t) { return t[0] === p[2]; }) ? p[2] : "words") : null;
     var sy = window.scrollY;
     document.body.setAttribute("data-lang", ROUTE.lang || "");
@@ -449,6 +450,7 @@
     if (!ROUTE.lang) viewHome();
     else if (p[1] === "wrong") viewWrong(ROUTE.lang);
     else if (ROUTE.check) viewCheck(ROUTE.lang, +p[2]);
+    else if (ROUTE.report) viewReport(ROUTE.lang, +p[2]);
     else if (!ROUTE.day) viewLang(ROUTE.lang);
     else viewDay(ROUTE.lang, ROUTE.day, ROUTE.tab);
     measureStick();
@@ -666,6 +668,7 @@
         '<span class="day-count" title="끝낸 단계">' + (dn === 6 ? ICON.check + " 완료" : dn + " / 6") + "</span></div>" +
         (d.theme ? '<div class="day-theme">' + K(d.theme, lang, 0) + "</div>" : "") + '<div class="pills">' + st + "</div></a>";
       checksOf(lang).forEach(function (c) { if (c.to === d.day) h += checkCard(lang, c); });
+      reportsOf(lang).forEach(function (r) { if (r.to === d.day) h += reportLink(lang, r); });
     });
     $app.innerHTML = h + "</div>";
   }
@@ -1078,7 +1081,7 @@
           '</div><div class="rq-e" hidden></div></li>';
       });
       h += "</ol>";
-      if (r.k) h += '<details class="trans" hidden data-tr="' + ri + '"><summary>전문 해석</summary><div>' + K(r.k, lang) + "</div></details>";
+      if (r.k) h += '<details class="trans full-text" hidden data-tr="' + ri + '"><summary>전문 해석 (' + esc(L.helper.label) + ")</summary><div>" + fullTrans(r, lang) + "</div></details>";
     });
     var last = prog(lang, d.day).reading;
     h += '<div class="row-actions"><button type="button" class="btn" id="grade">채점하기</button>' + (last ? '<span class="last">지난 기록: ' + last.s + " / " + last.n + "</span>" : "") + "</div>";
@@ -1146,16 +1149,21 @@
       opts: ord.map(function (k) { return T(x.o[k], lang, 0); }), answer: ord.indexOf(x.a),
       after: '<div class="qa-expl"><div class="talk-t">' + x.lines.map(function (l) { return '<div class="talk-l"><div class="qa-full">' + T(l.t, lang, hp) + '</div><div class="ex-k">' + K(l.k, lang) + "</div></div>"; }).join("") + '</div><p class="expl">' + K(x.e, lang) + "</p></div>" };
   }
+  // 전문 해석: 읽기 도움을 모두 단 원문과 해석을 단락마다 나란히(단락 수가 다르면 원문 전체 뒤에 해석).
+  // 학습 독해와 테스트 독해가 함께 쓴다(2026-11-24 테스트, 2026-11-27 학습 독해도 — 사용자 지시)
+  function fullTrans(rr, lang) {
+    var hp = LBY[lang].helper.modes.length - 1, paras = rr.text.split(/\n\s*\n/), ks = rr.k ? rr.k.split(/\n\s*\n/) : [];
+    return paras.length === ks.length
+      ? paras.map(function (p, i) { return '<p class="para">' + T(p, lang, hp) + '</p><p class="ft-k">' + K(ks[i], lang) + "</p>"; }).join("")
+      : paras.map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") + (rr.k ? '<div class="ft-k">' + K(rr.k, lang) + "</div>" : "");
+  }
   // 지문 하나의 독해 문항들(지문을 문제마다 함께 보인다, 읽기 도움 없음)
   function passageQs(rr, lang) {
     var L = LBY[lang], hp = L.helper.modes.length - 1, xh = lang === "ja" ? hp : null;   // 일본어 해설은 설정과 상관없이 후리가나
     var pass = '<div class="passage mini">' + rr.text.split(/\n\s*\n/).map(function (p) { return '<p class="para">' + T(p, lang, 0) + "</p>"; }).join("") + "</div>";
     var paras = rr.text.split(/\n\s*\n/), ks = rr.k ? rr.k.split(/\n\s*\n/) : [];
     var full = lang === "ja" ? paras.map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") : "";
-    // 전문 해석: 읽기 도움을 단 원문과 해석을 단락마다 나란히(단락 수가 다르면 원문 전체 뒤에 해석)
-    var both = paras.length === ks.length
-      ? paras.map(function (p, i) { return '<p class="para">' + T(p, lang, hp) + '</p><p class="ft-k">' + K(ks[i], lang) + "</p>"; }).join("")
-      : paras.map(function (p) { return '<p class="para">' + T(p, lang, hp) + "</p>"; }).join("") + (rr.k ? '<div class="ft-k">' + K(rr.k, lang) + "</div>" : "");
+    var both = fullTrans(rr, lang);
     return rr.qs.map(function (rq, qi) {
       var ord = shuffle(rq.o.map(function (_, i) { return i; })), lastQ = qi === rr.qs.length - 1;
       var af = '<div class="qa-expl">' + (rq.ev ? '<blockquote class="ev">' + T(rq.ev, lang, hp) + "</blockquote>" : "") + '<div class="expl">' + K(rq.e, lang, xh) + "</div>" +
@@ -1200,6 +1208,28 @@
   // 문항마다 맞고 틀림(log)을 남긴다: PROG["<lang>-c<no>"] = { s, n, t, log, first: 첫 응시 }. 다음 5일 난이도는 이 기록으로 정한다(_tools/report.mjs).
   function checksOf(lang) { return (window.FL_CHECKS || []).filter(function (c) { return c.lang === lang; }).sort(function (a, b) { return a.no - b.no; }); }
   function checkRec(lang, no) { return PROG[lang + "-c" + no] || null; }
+  // ----- 5일 리포트 (종합 점검 결과 정리 + 다음 5일 계획, data/<lang>/rNN.js) -----
+  function reportsOf(lang) { return (window.FL_REPORTS || []).filter(function (r) { return r.lang === lang; }).sort(function (a, b) { return a.no - b.no; }); }
+  function reportLink(lang, r) {
+    return '<a class="report-link" href="#/' + lang + "/report/" + r.no + '"><span class="rl-t">리포트 ' + r.no + " · Day " + r.from + "–" + r.to + '</span><span class="rl-s">' + esc(r.sub || "") + "</span></a>";
+  }
+  function viewReport(lang, no) {
+    var L = LBY[lang], r = reportsOf(lang).filter(function (x) { return x.no === no; })[0];
+    var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>리포트 " + no + "</span></nav>";
+    if (!r) { $app.innerHTML = h + '<p class="empty">없는 리포트입니다.</p>'; return; }
+    function cell(x) { return K(String(x), lang); }
+    function table(t) {
+      return '<table class="rp-t"><thead><tr>' + t.head.map(function (x) { return "<th>" + esc(x) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+        t.rows.map(function (row) { return "<tr>" + row.map(function (x) { return "<td>" + cell(x) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table>";
+    }
+    h += '<article class="report"><h1>' + esc(r.title) + '</h1><p class="rp-meta">' + esc(L.ko) + " · Day " + r.from + "–" + r.to + " · " + esc(r.date) + " 작성</p>";
+    r.sections.forEach(function (sec) {
+      h += "<section><h2>" + esc(sec.h) + "</h2>" + (sec.p || []).map(function (x) { return "<p>" + cell(x) + "</p>"; }).join("") +
+        (sec.tables || []).map(table).join("") + (sec.after || []).map(function (x) { return "<p>" + cell(x) + "</p>"; }).join("") + "</section>";
+    });
+    h += "</article>";
+    $app.innerHTML = h;
+  }
   function checkCard(lang, c) {
     var g = checkRec(lang, c.no), f = g && g.first;
     return '<a class="day-card check-card" href="#/' + lang + "/check/" + c.no + '"><div class="day-head"><span class="day-no">점검 ' + c.no + '</span><span class="day-title">종합 점검 · Day ' + c.from + "–" + c.to + "</span></div>" +
@@ -1229,7 +1259,8 @@
       return shuffle(qs).concat(passageQs(c.reading, lang).map(function (q, i) { q.key = "r:" + i; q.ty = "reading"; return q; }));
     }
     var g = checkRec(lang, no);
-    h += '<section class="hero small"><h1>종합 점검 ' + no + '</h1><p class="sub">Day ' + c.from + "–" + c.to + ' 전체를 한 번에 확인합니다.</p></section><div id="ckPane"></div>';
+    var rp = reportsOf(lang).filter(function (x) { return x.no === no; })[0];
+    h += '<section class="hero small"><h1>종합 점검 ' + no + '</h1><p class="sub">Day ' + c.from + "–" + c.to + ' 전체를 한 번에 확인합니다.' + (rp ? ' <a href="#/' + lang + "/report/" + no + '">리포트 보기</a>' : "") + '</p></section><div id="ckPane"></div>';
     if (g && g.log) h += '<div class="ck-last"><h3>' + (g.first && g.t !== g.first.t ? "최근 결과" : "결과") + " (" + new Date(g.t).toLocaleDateString("ko-KR") + ")</h3>" + checkSummary(lang, g.log) + "</div>";
     $app.innerHTML = h;
     var pane = document.getElementById("ckPane");
