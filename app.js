@@ -444,6 +444,7 @@
     ROUTE.check = !!(ROUTE.lang && p[1] === "check");
     ROUTE.report = !!(ROUTE.lang && p[1] === "report");
     ROUTE.sound = !!(ROUTE.lang && p[1] === "sound");
+    ROUTE.cases = !!(ROUTE.lang && p[1] === "cases");
     ROUTE.tab = ROUTE.day ? (TABS.some(function (t) { return t[0] === p[2]; }) ? p[2] : "words") : null;
     var sy = window.scrollY;
     document.body.setAttribute("data-lang", ROUTE.lang || "");
@@ -453,6 +454,7 @@
     else if (ROUTE.check) viewCheck(ROUTE.lang, +p[2]);
     else if (ROUTE.report) viewReport(ROUTE.lang, +p[2]);
     else if (ROUTE.sound) viewSound(ROUTE.lang);
+    else if (ROUTE.cases) viewCases(ROUTE.lang);
     else if (!ROUTE.day) viewLang(ROUTE.lang);
     else viewDay(ROUTE.lang, ROUTE.day, ROUTE.tab);
     measureStick();
@@ -657,7 +659,7 @@
     var L = LBY[lang], ds = days(lang), nw = Object.keys(wrongOf(lang)).length;
     var h = '<nav class="crumb"><a href="#/">처음</a> / <span>' + esc(L.ko) + "</span></nav>" +
       '<section class="hero small lang-hero"><span class="lang-glyph" aria-hidden="true" lang="' + L.tag + '">' + GLYPH[lang] + '</span><h1 lang="' + L.tag + '">' + esc(L.name) + '</h1><p class="sub">' + esc(L.ko) + " · 목표 " + esc(L.goal) + "</p></section>";
-    h += '<div class="row-actions"><a class="btn ghost" href="#/' + lang + '/wrong">오답 노트' + (nw ? " (" + nw + ")" : "") + "</a>" + (soundPack(lang) ? '<a class="btn ghost" href="#/' + lang + '/sound">발음 연습</a>' : "") + "</div>";
+    h += '<div class="row-actions"><a class="btn ghost" href="#/' + lang + '/wrong">오답 노트' + (nw ? " (" + nw + ")" : "") + "</a>" + (soundPack(lang) ? '<a class="btn ghost" href="#/' + lang + '/sound">발음 연습</a>' : "") + (L.casebook ? '<a class="btn ghost" href="#/' + lang + '/cases">격 변화</a>' : "") + "</div>";
     h += '<div class="day-list">';
     ds.forEach(function (d) {
       var g = prog(lang, d.day);
@@ -861,7 +863,7 @@
     return t;
   }
   function makeWordQs(items, lang) {
-    return items.map(function (it) { var ts = wordTypes(lang, it.w); return wordQ(it, lang, ts[Math.floor(Math.random() * ts.length)]); });
+    return items.map(function (it) { var ts = wordTypes(lang, it.w), q = wordQ(it, lang, ts[Math.floor(Math.random() * ts.length)]); q.key = "w:" + q.wk; return q; });   // 문항별 기록(2026-11-27): 리포트에서 유형(뜻·단어·듣기·읽기)별로 나눠 본다
   }
   function grammarQ(gq, lang, gp, hp) {
     var L = LBY[lang], idx = gq.o.map(function (_, i) { return i; });
@@ -922,7 +924,7 @@
     });
     if (q.wk) {
       var W = wrongOf(q.lang);
-      if (!ok) W[q.wk] = { n: ((W[q.wk] && W[q.wk].n) || 0) + 1, t: Date.now() };
+      if (!ok) { var old = W[q.wk] || {}, tys = (old.tys || []).concat([q.ty || ""]).slice(-5); W[q.wk] = { n: (old.n || 0) + 1, t: Date.now(), ty: q.ty || "", tys: tys }; }   // 틀린 유형도 남긴다(2026-11-27)
       else if (z.opt.wrongMode && W[q.wk]) { W[q.wk].ok = (W[q.wk].ok || 0) + 1; if (W[q.wk].ok >= 2) delete W[q.wk]; }
       saveWrong();
     }
@@ -962,7 +964,7 @@
     var lang = L.id;
     function make() { return makeWordQs(shuffle(d.words.map(function (w) { return { w: w, day: d.day }; })), lang).map(function (q, i, all) { return q; }); }
     startScreen(pane, "단어 테스트", d.words.length + "문항 · 뜻 고르기, 단어 고르기, 듣고 고르기" + (lang === "ja" ? ", 읽기 고르기" : lang === "zh" ? ", 병음 고르기" : "") + "가 섞여 나옵니다. 읽기 도움은 보이지 않습니다.", prog(lang, d.day).wtest, function () {
-      runQuiz(pane, make(), { make: make, onDone: function (s, n) { prog(lang, d.day).wtest = { s: s, n: n, t: Date.now() }; saveProg(); } });
+      runQuiz(pane, make(), { make: make, onDone: function (s, n, log) { prog(lang, d.day).wtest = { s: s, n: n, t: Date.now(), log: log }; saveProg(); } });
     });
   }
   function startScreen(pane, title, desc, last, start) {
@@ -988,7 +990,7 @@
   function caseBox(L, day) {
     var lang = L.id;
     return '<details class="cases" open><summary>격 정리 — Day ' + day + "까지</summary>" +
-      '<p class="hint">러시아어 명사·대명사는 문장 속 역할에 따라 끝이 바뀝니다. 이것을 격이라 하고 모두 6개입니다. 지금까지 배운 것만 채워 두었습니다.</p><ol class="case-l">' +
+      '<p class="hint">러시아어 명사·대명사는 문장 속 역할에 따라 끝이 바뀝니다. 이것을 격이라 하고 모두 6개입니다. 지금까지 배운 것만 채워 두었습니다.' + (L.casebook ? ' <a href="#/' + lang + '/cases">6격 전체 정리 보기</a>' : '') + '</p><ol class="case-l">' +
       L.cases.map(function (c) {
         var got = c.learn.filter(function (x) { return x.day <= day; });
         return '<li class="case' + (got.length ? "" : " later") + '"><div class="case-h"><b>' + esc(c.n) + '</b><span lang="ru">' + T(c.ru, lang) + '</span><span class="case-q" lang="ru">' + T(c.ask, lang) + "</span></div>" +
@@ -1188,20 +1190,20 @@
       var ws = pick(today, nt).concat(pick(before, nb));
       var qs = makeWordQs(ws, lang).map(function (q) { q.tag = "단어"; return q; });
       var rv = d.review || {};
-      if (rv.grammar) rv.grammar.forEach(function (gq) { var q = grammarQ(gq, lang, d.grammar[gq.g]); q.tag = "문법"; q.fixed = true; qs.push(q); });
+      if (rv.grammar) rv.grammar.forEach(function (gq) { var q = grammarQ(gq, lang, d.grammar[gq.g]); q.tag = "문법"; q.fixed = true; q.key = "g:" + d.day + "." + gq.g; q.ty = "grammar"; qs.push(q); });
       else d.grammar.forEach(function (g) { (g.quiz || []).forEach(function (gq) { var q = grammarQ(gq, lang, g); q.tag = "문법"; q.fixed = true; qs.push(q); }); });
-      if (rv.talk) rv.talk.forEach(function (x) { qs.push(talkQ(x, lang)); });
-      if (rv.listen) rv.listen.forEach(function (x) { qs.push(listenQ(x, lang)); });
+      if (rv.talk) rv.talk.forEach(function (x, i) { var q = talkQ(x, lang); q.key = "t:" + i; q.ty = "talk"; qs.push(q); });
+      if (rv.listen) rv.listen.forEach(function (x, i) { var q = listenQ(x, lang); q.key = "l:" + i; q.ty = "listen-s"; qs.push(q); });
       else pick(d.dialogue.lines.filter(function (l) { return FL.plain(l.t).length > 3; }), 2).forEach(function (ln) { qs.push(dialogQ(d, ln, lang)); });
       qs = shuffle(qs);
       // 독해: 학습용과 다른 지문. 지문을 문제마다 함께 보인다
-      if (d.review && d.review.reading) qs = qs.concat(passageQs(d.review.reading, lang));
+      if (d.review && d.review.reading) qs = qs.concat(passageQs(d.review.reading, lang).map(function (q, i) { q.key = "r:" + i; q.ty = "reading"; return q; }));
       return qs;
     }
     var rv0 = d.review || {}, nG = rv0.grammar ? rv0.grammar.length : d.grammar.reduce(function (s, g) { return s + (g.quiz || []).length; }, 0), nL = (rv0.listen ? rv0.listen.length : 2) + (rv0.talk ? rv0.talk.length : 0);
     var nR = d.review && d.review.reading ? d.review.reading.qs.length : 0;
     startScreen(pane, "정리 테스트", "단어 10문항(오늘 단어와 지난 날 단어에서 무작위), 문법 " + nG + "문항, 듣기 " + nL + "문항" + (nR ? ", 독해 " + nR + "문항" : "") + ". 문법·듣기·독해는 학습 화면에 나오지 않은 새 문장입니다. 읽기 도움은 보이지 않습니다.", prog(lang, d.day).review, function () {
-      runQuiz(pane, make(), { make: make, onDone: function (s, n) { prog(lang, d.day).review = { s: s, n: n, t: Date.now() }; saveProg(); } });
+      runQuiz(pane, make(), { make: make, onDone: function (s, n, log) { prog(lang, d.day).review = { s: s, n: n, t: Date.now(), log: log }; saveProg(); } });
     });
   }
 
@@ -1225,19 +1227,31 @@
       playOne(s.t, s.lang, s.v, 0.7).then(function () { if (my === seqId) setTimeout(function () { next(i + 1); }, 700); });
     })(0);
   });
-  function videoList(vs) {
-    if (!vs || !vs.length) return "";
-    return '<div class="snd-vid"><span class="lbl">참고 영상</span><ul>' + vs.map(function (v) {
-      return '<li><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(v.id) + '" target="_blank" rel="noopener">' + esc(v.t) + "</a> <span class=\"ch\">" + esc(v.ch) + "</span></li>";
+  // 영상: 페이지 안에서 재생(youtube-nocookie 임베드). 처음엔 미리보기 그림만 두고 누르면 iframe을 넣는다. 챕터 단추는 그 시각부터.
+  function fmtSec(s) { s = Math.max(0, s | 0); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ":" + (m < 10 ? "0" : "") : "") + m + ":" + (x < 10 ? "0" : "") + x; }
+  function ytSrc(id, sec) { return "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(id) + "?start=" + (sec | 0) + "&autoplay=1&rel=0&playsinline=1&modestbranding=1"; }
+  function videoBlock(S, list, tab) {
+    if (!list || !list.length) return "";
+    return '<div class="yt-area" id="yt-' + tab + '"><div class="yt-player" hidden></div><ul class="yt-list">' + list.map(function (v) {
+      var m = S.videos[v.id] || { t: v.id, ch: "" };
+      return '<li><button type="button" class="yt-thumb" data-yt="' + esc(v.id) + '" data-sec="' + ((v.marks[0] && v.marks[0][0]) || 0) + '" aria-label="재생: ' + esc(m.t) + '"><img loading="lazy" alt="" src="https://i.ytimg.com/vi/' + encodeURIComponent(v.id) + '/mqdefault.jpg"><span class="yt-play" aria-hidden="true">' + ICON.play + "</span></button>" +
+        '<div class="yt-meta"><div class="yt-t">' + esc(m.t) + '</div><div class="yt-ch">' + esc(m.ch) + (m.lang === "en" ? " · 영어" : " · 한국어") + "</div>" +
+        (v.marks.length ? '<div class="yt-marks">' + v.marks.map(function (k) { return '<button type="button" data-yt="' + esc(v.id) + '" data-sec="' + k[0] + '">' + esc(k[1]) + " <span>" + fmtSec(k[0]) + "</span></button>"; }).join("") + "</div>" : '<div class="yt-ch">처음부터 재생</div>') +
+        "</div></li>";
     }).join("") + "</ul></div>";
   }
-  function toneSvg() {
-    var tones = [["1성", [[0, 5], [1, 5]]], ["2성", [[0, 3], [1, 5]]], ["3성", [[0, 2], [0.45, 1], [1, 4]]], ["4성", [[0, 5], [1, 1]]]];
-    return '<div class="tone-row">' + tones.map(function (t) {
-      var pts = t[1].map(function (q) { return (8 + q[0] * 44) + "," + (6 + (5 - q[1]) * 9); }).join(" ");
-      var grid = [1, 2, 3, 4, 5].map(function (l) { var y = 6 + (5 - l) * 9; return '<line x1="4" x2="56" y1="' + y + '" y2="' + y + '" class="tg"/>'; }).join("");
-      return '<figure><svg viewBox="0 0 60 48" width="72" height="58" aria-hidden="true">' + grid + '<polyline points="' + pts + '" class="tl-line"/></svg><figcaption>' + t[0] + "</figcaption></figure>";
-    }).join("") + "</div>";
+  function playVideo(area, id, sec) {
+    stopAudio();
+    var pl = area.querySelector(".yt-player");
+    pl.hidden = false;
+    pl.innerHTML = '<iframe src="' + ytSrc(id, sec) + '" title="YouTube 영상" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe><button type="button" class="yt-close">영상 닫기</button>';
+    pl.querySelector(".yt-close").onclick = function () { pl.innerHTML = ""; pl.hidden = true; };
+    pl.scrollIntoView({ block: "center" });
+  }
+  function toneHead(t) {
+    var pts = t.pts.map(function (q) { return (6 + q[0] * 36) + "," + (4 + (5 - q[1]) * 7); }).join(" ");
+    var grid = [1, 2, 3, 4, 5].map(function (l) { var y = 4 + (5 - l) * 7; return '<line x1="3" x2="45" y1="' + y + '" y2="' + y + '" class="tg"/>'; }).join("");
+    return '<svg viewBox="0 0 48 40" width="48" height="40" aria-hidden="true">' + grid + '<polyline points="' + pts + '" class="tl-line"/></svg>';
   }
   function zhTone(p) {
     if (/[āēīōūǖ]/.test(p)) return 1; if (/[áéíóúǘ]/.test(p)) return 2; if (/[ǎěǐǒǔǚ]/.test(p)) return 3; if (/[àèìòùǜ]/.test(p)) return 4; return 0;
@@ -1279,55 +1293,139 @@
     }
     return { groups: groups, order: order, all: order.reduce(function (a, k) { return a.concat(groups[k].items); }, []) };
   }
+  // 발음 화면의 클릭은 한 곳에서 받는다(화면을 다시 그릴 때마다 리스너가 쌓이지 않게). SNDCTX는 지금 그린 발음 화면의 칸·묶음.
+  var SNDCTX = null;
+  document.addEventListener("click", function (e) { if (SNDCTX && e.target.closest && e.target.closest(".sound")) SNDCTX.handle(e); });
+  // 발음 화면: 위 탭(한 번에 한 주제) → 요점(한국어 + English) → 차트(누르면 소리 + 아래 설명) → 영상(페이지 안 재생) → 퀴즈
   function viewSound(lang) {
     var L = LBY[lang], S = soundPack(lang), hp = L.helper.modes.length - 1;
     var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>발음 연습</span></nav>";
     if (!S) { $app.innerHTML = h + '<p class="empty">이 언어의 발음 연습은 아직 없습니다.</p>'; return; }
-    var DR = drillData(lang), QUIZ = {};
-    h += '<article class="sound"><h1>' + esc(S.title) + "</h1>" + S.intro.map(function (x) { return "<p>" + K(x, lang) + "</p>"; }).join("") + videoList(S.videos);
-    h += '<nav class="snd-toc">' + S.sections.map(function (sec) { return '<button type="button" data-goto="snd-' + sec.id + '">' + esc(sec.h) + "</button>"; }).join("") + '<button type="button" data-goto="snd-drill">' + esc(S.drill.h) + "</button></nav>";
-    S.sections.forEach(function (sec) {
-      h += '<section id="snd-' + sec.id + '"><h2>' + esc(sec.h) + "</h2>" + (sec.tones ? toneSvg() : "") + sec.p.map(function (x) { return "<p>" + K(x, lang) + "</p>"; }).join("");
-      if (sec.items) h += '<ul class="snd-list">' + sec.items.map(function (it) {
-        return '<li><span class="snd-t" lang="' + L.tag + '">' + (lang === "ru" ? T(it.t, lang) : esc(it.t)) + '</span><span class="snd-py">' + (lang === "ru" ? "" : esc(it.py)) + '</span><span class="snd-k">' + esc(it.k || "") + '</span><span class="snd-b">' + spk(it.t, lang, "F") + repBtn(it.t, lang) + "</span></li>";
-      }).join("") + "</ul>";
-      if (sec.letters) sec.letters.forEach(function (g) {
-        h += "<h3>" + esc(g.g) + '</h3><ul class="snd-list letters">' + g.rows.map(function (r) {
-          return '<li><span class="snd-l" lang="ru">' + esc(r.l) + '</span><span class="snd-k">' + K(r.k, lang) + '</span><span class="snd-t" lang="ru">' + T(r.t, lang) + '</span><span class="snd-b">' + spk(r.t, lang, "F") + repBtn(r.t, lang) + "</span></li>";
-        }).join("") + "</ul>";
-      });
-      h += videoList(sec.videos);
-      if (sec.quiz) { QUIZ[sec.id] = sec.quiz; h += '<div class="snd-quiz" data-q="' + sec.id + '"></div>'; }
-      h += "</section>";
+    var DR = drillData(lang), CELLS = [], QUIZ = {}, tabs = S.tabs.concat([S.drill]);
+    var cur = load("fl_sndtab_" + lang, tabs[0].id); if (!tabs.some(function (t) { return t.id === cur; })) cur = tabs[0].id;
+    function cell(c, inner, cls) { CELLS.push(c); return '<button type="button" class="sc' + (cls ? " " + cls : "") + '" data-cell="' + (CELLS.length - 1) + '">' + inner + "</button>"; }
+    function word(t) { return lang === "ru" ? T(t, lang) : '<span lang="zh-CN">' + esc(t) + "</span>"; }
+    function keyList(tab) {
+      return '<ul class="snd-key">' + tab.key.map(function (k) { return '<li><div class="ko">' + K(k.ko, lang) + "</div>" + (k.en ? '<div class="en" lang="en">' + esc(k.en) + "</div>" : "") + "</li>"; }).join("") + "</ul>";
+    }
+    function chart(tab) {
+      var c = tab.chart; if (!c) return "";
+      if (c.type === "tone") {
+        var t = '<div class="tone-wrap"><table class="tone-t"><thead><tr><th></th>' + c.tones.map(function (x) {
+          return "<th>" + cell(Object.assign({ kind: "tone" }, x), toneHead(x) + '<span class="tn">' + esc(x.name) + " " + esc(x.sym) + "</span>", "th") + "</th>";
+        }).join("") + "</tr></thead><tbody>" + c.rows.map(function (r) {
+          return '<tr><th class="rb">' + esc(r.b) + "</th>" + r.cells.map(function (x, i) {
+            return "<td>" + cell(Object.assign({ kind: "char", tone: c.tones[i] }, x), '<span class="sc-t" lang="zh-CN">' + esc(x.t) + '</span><span class="sc-py">' + esc(x.py) + "</span>") + "</td>";
+          }).join("") + "</tr>";
+        }).join("") + "</tbody></table></div>";
+        if (c.neutral) t += '<div class="neutral-row">' + cell(Object.assign({ kind: "tone", sym: "", t: c.neutral.cells[0].t, py: c.neutral.cells[0].py }, c.neutral), '<span class="tn">' + esc(c.neutral.name) + "</span>", "nh") +
+          c.neutral.cells.map(function (x) { return cell(Object.assign({ kind: "char", tone: c.neutral }, x), '<span class="sc-t" lang="zh-CN">' + esc(x.t) + '</span><span class="sc-py">' + esc(x.py) + "</span>"); }).join("") + "</div>";
+        return t;
+      }
+      if (c.type === "grid") return c.groups.map(function (g) {
+        return '<div class="sg">' + (c.groups.length > 1 ? '<div class="sg-h">' + esc(g.g) + "</div>" : "") + '<div class="sg-cells">' + g.cells.map(function (x) {
+          return cell(Object.assign({ kind: "sound" }, x), '<span class="sc-sym" lang="' + L.tag + '">' + esc(x.sym) + '</span><span class="sc-ex" lang="' + L.tag + '">' + esc(FL.plain(x.t)) + (x.py ? " " + esc(x.py) : "") + "</span>");
+        }).join("") + "</div></div>";
+      }).join("");
+      if (c.type === "table") return '<table class="snd-tab"><thead><tr>' + c.head.map(function (x) { return "<th>" + esc(x) + "</th>"; }).join("") + "</tr></thead><tbody>" + c.rows.map(function (r) {
+        return '<tr><td class="tw">' + word(r.t) + (r.w ? '<div class="sub">' + esc(r.w) + "</div>" : "") + '</td><td class="ts">' + esc(r.s) + '</td><td class="tk">' + esc(r.k || "") + '</td><td class="tb">' + spk(r.t, lang, "F") + repBtn(r.t, lang) + "</td></tr>";
+      }).join("") + "</tbody></table>";
+      if (c.type === "pairs") return '<table class="snd-tab pairs"><tbody>' + c.rows.map(function (r) {
+        SAY.push({ seq: [r.a.t, r.b.t, r.a.t, r.b.t], lang: lang });
+        return "<tr>" + [r.a, r.b].map(function (x) { return '<td class="pw">' + word(x.t) + '<span class="pk">' + esc(x.k) + "</span>" + spk(x.t, lang, "F") + "</td>"; }).join("") +
+          '<td class="tb"><button type="button" class="snd-rep" data-alt="' + (SAY.length - 1) + '">번갈아 듣기</button></td></tr>';
+      }).join("") + "</tbody></table>";
+      return "";
+    }
+    function drillChart() {
+      if (!DR.all.length) return '<p class="empty">아직 묶을 단어가 없습니다.</p>';
+      if (lang === "zh") {
+        var cols = [1, 2, 3, 4, 0];
+        return '<div class="tone-wrap"><table class="drill-m"><thead><tr><th>앞 \\ 뒤</th>' + cols.map(function (b) { return "<th>" + toneName(b) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+          [1, 2, 3, 4].map(function (a) {
+            return "<tr><th>" + toneName(a) + "</th>" + cols.map(function (b) {
+              var g = DR.groups[a + "+" + b];
+              return "<td>" + (g ? cell({ kind: "drill", key: a + "+" + b }, '<span class="dn">' + g.items.length + "</span>") : "") + "</td>";
+            }).join("") + "</tr>";
+          }).join("") + "</tbody></table></div>";
+      }
+      return '<div class="sg-cells drill-r">' + DR.order.map(function (k) { var g = DR.groups[k]; return cell({ kind: "drill", key: k }, '<span class="sc-sym">' + esc(g.label.replace(" 음절에 강세", "")) + '</span><span class="sc-ex">음절에 강세 · ' + g.items.length + "개</span>"); }).join("") + "</div>";
+    }
+    function detail(c) {
+      var vbtn = c.v ? '<button type="button" class="snd-rep" data-yt="' + esc(c.v[0]) + '" data-sec="' + c.v[1] + '">영상에서 보기 ' + fmtSec(c.v[1]) + "</button>" : "";
+      if (c.kind === "drill") {
+        var g = DR.groups[c.key];
+        return '<div class="sd-head"><b>' + esc(g.label) + '</b><span class="n">' + g.items.length + '개</span><button type="button" class="btn sm ghost" data-drill="' + esc(c.key) + '">' + ICON.play + ' 이어 듣기</button></div><ul class="drill-w">' +
+          g.items.map(function (it, wi) {
+            return '<li id="dw' + wi + '"><span class="dw-t">' + (lang === "ru" ? T(it.w.w, lang) : '<span lang="zh-CN">' + esc(FL.plain(it.w.w)) + "</span>") + "</span>" + (it.py ? '<span class="sc-py">' + esc(it.py) + "</span>" : "") + '<span class="dw-k">' + K(it.w.m, lang, 0) + '</span><span class="snd-day">D' + it.day + "</span>" + spk(it.w.say || it.w.w, lang, "F") + "</li>";
+          }).join("") + "</ul>";
+      }
+      var tone = c.kind === "char" ? c.tone : null;
+      var big = c.kind === "tone" ? toneHead(c.pts ? c : { pts: [[0, 3], [1, 3]] }) + '<span class="sd-sym">' + esc(c.name) + " " + esc(c.sym || "") + "</span>" + (c.ipa ? '<span class="sd-ipa">음높이 ' + esc(c.ipa) + "</span>" : "")
+        : c.kind === "char" ? '<span class="sd-sym" lang="zh-CN">' + esc(c.t) + '</span><span class="sd-py">' + esc(c.py) + '</span><span class="sd-ipa">' + esc(c.k || "") + " · " + esc(tone.name) + "</span>"
+        : '<span class="sd-sym" lang="' + L.tag + '">' + esc(c.sym) + '</span>' + (c.ipa ? '<span class="sd-ipa">[' + esc(c.ipa) + "]</span>" : "");
+      var ko = (tone || c).ko, en = (tone || c).en, vv = c.v || (tone && tone.v);
+      if (!c.v && vv) vbtn = '<button type="button" class="snd-rep" data-yt="' + esc(vv[0]) + '" data-sec="' + vv[1] + '">영상에서 보기 ' + fmtSec(vv[1]) + "</button>";
+      var ex = c.kind === "char" ? "" : '<div class="sd-ex"><span class="sd-w">' + word(c.t) + "</span>" + (c.py && lang === "zh" ? '<span class="sc-py">' + esc(c.py) + "</span>" : "") + (c.k ? '<span class="dw-k">' + esc(c.k) + "</span>" : "") + "</div>";
+      return '<div class="sd-head">' + big + "</div>" + ex +
+        '<dl class="sd-tips"><dt>한국어</dt><dd>' + K(ko || "", lang) + '</dd><dt>English</dt><dd lang="en">' + esc(en || "") + "</dd></dl>" +
+        '<div class="sd-btns">' + spk(c.t, lang, "F") + repBtn(c.t, lang) + vbtn + "</div>";
+    }
+    h += '<article class="sound"><h1>' + esc(S.title) + '</h1><p class="sub">' + esc(S.sub) + "</p>" +
+      '<nav class="snd-tabs" role="tablist">' + tabs.map(function (t) { return '<button type="button" role="tab" data-tab="' + t.id + '"' + (t.id === cur ? ' aria-selected="true"' : "") + ">" + esc(t.label) + "</button>"; }).join("") + "</nav>";
+    tabs.forEach(function (tab) {
+      var isDrill = tab === S.drill;
+      h += '<section class="snd-pane" data-pane="' + tab.id + '"' + (tab.id === cur ? "" : " hidden") + ">" + keyList(tab) +
+        (isDrill ? drillChart() : chart(tab)) + (tab.note ? '<p class="snd-note">' + K(tab.note, lang) + "</p>" : "") +
+        '<div class="snd-detail" data-detail="' + tab.id + '"><p class="hint">' + (isDrill ? "칸을 누르면 그 묶음의 단어가 여기에 나옵니다." : tab.chart && /tone|grid/.test(tab.chart.type) ? "칸을 누르면 소리가 나고, 여기에 설명이 나옵니다." : "▶로 듣고, '느리게 3번'으로 따라 하십시오.") + "</p></div>";
+      if (tab.quiz) { QUIZ[tab.id] = tab.quiz; h += '<div class="snd-quiz" data-q="' + tab.id + '"></div>'; }
+      if (isDrill && DR.all.length >= 4) { QUIZ.drill = { h: lang === "zh" ? "단어 듣고 성조 조합 고르기" : "단어 듣고 강세 위치 고르기", drill: true, n: 10 }; h += '<div class="snd-quiz" data-q="drill"></div>'; }
+      h += videoBlock(S, tab.videos, tab.id) + "</section>";
     });
-    // 배운 단어 묶음
-    h += '<section id="snd-drill"><h2>' + esc(S.drill.h) + "</h2>" + S.drill.p.map(function (x) { return "<p>" + K(x, lang) + "</p>"; }).join("");
-    if (!DR.all.length) h += '<p class="empty">아직 묶을 단어가 없습니다.</p>';
-    DR.order.forEach(function (key, gi) {
-      var g = DR.groups[key];
-      h += '<div class="drill-g"><div class="drill-h"><b>' + esc(g.label) + '</b><span class="n">' + g.items.length + '개</span><button type="button" class="btn sm ghost" data-drill="' + gi + '">' + ICON.play + " 이어 듣기</button></div><ul class=\"drill-w\">" +
-        g.items.map(function (it, wi) {
-          return '<li id="dw' + gi + "_" + wi + '"><span class="snd-t" lang="' + L.tag + '">' + (lang === "ru" ? T(it.w.w, lang) : esc(FL.plain(it.w.w))) + "</span>" + (lang === "zh" ? '<span class="snd-py">' + esc(it.py) + "</span>" : "") + '<span class="snd-k">' + K(it.w.m, lang, 0) + '</span><span class="snd-day">D' + it.day + "</span>" + spk(it.w.say || it.w.w, lang, "F") + "</li>";
-        }).join("") + "</ul></div>";
-    });
-    if (DR.all.length >= 4) { QUIZ.drill = { h: lang === "zh" ? "단어 듣고 성조 조합 고르기" : "단어 듣고 강세 위치 고르기", drill: true, n: 10 }; h += '<div class="snd-quiz" data-q="drill"></div>'; }
-    h += videoList(S.drill.videos) + "</section></article>";
+    h += "</article>";
     $app.innerHTML = h;
     applyHelper(lang, $app);
 
-    $app.querySelectorAll("[data-goto]").forEach(function (b) { b.onclick = function () { var el = document.getElementById(b.getAttribute("data-goto")); if (el) el.scrollIntoView({ block: "start" }); }; });
-    $app.querySelectorAll("[data-drill]").forEach(function (b) {
+    function resetQuizzes() { QZ = null; $app.querySelectorAll(".snd-quiz").forEach(idle); }
+    $app.querySelectorAll("[data-tab]").forEach(function (b) {
       b.onclick = function () {
-        var gi = +b.getAttribute("data-drill"), g = DR.groups[DR.order[gi]];
-        playSeq(g.items.map(function (it, wi) { return { t: it.w.say || it.w.w, v: "F", el: document.getElementById("dw" + gi + "_" + wi), who: g.label + " · " + FL.plain(it.w.w).split(ACUTE).join("") }; }), lang);
+        cur = b.getAttribute("data-tab"); save("fl_sndtab_" + lang, cur); stopAudio(); resetQuizzes();
+        $app.querySelectorAll("[data-tab]").forEach(function (x) { if (x === b) x.setAttribute("aria-selected", "true"); else x.removeAttribute("aria-selected"); });
+        $app.querySelectorAll(".snd-pane").forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== cur; });
+        $app.querySelectorAll(".yt-player").forEach(function (p) { p.innerHTML = ""; p.hidden = true; });
+        var bar = $app.querySelector(".snd-tabs"); if (bar.getBoundingClientRect().top < 0 || window.scrollY > bar.offsetTop) window.scrollTo(0, Math.max(0, bar.offsetTop - stickBottom()));
       };
     });
+    SNDCTX = { handle: function (e) {
+      var c = e.target.closest("[data-cell]");
+      if (c) {
+        var d = CELLS[+c.getAttribute("data-cell")], pane = c.closest(".snd-pane"), box = pane.querySelector(".snd-detail");
+        pane.querySelectorAll(".sc.on").forEach(function (x) { x.classList.remove("on"); }); c.classList.add("on");
+        box.innerHTML = detail(d); applyHelper(lang, box);
+        if (d.kind !== "drill") { stopAudio(); var my = ++seqId; markPlaying(c); playOne(d.t, lang, "F").then(function () { if (my === seqId) markPlaying(null); }); }
+        var r = box.getBoundingClientRect(); if (r.top > innerHeight - 80) box.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      var y = e.target.closest("[data-yt]");
+      if (y) { var area = y.closest(".snd-pane").querySelector(".yt-area"); if (area) playVideo(area, y.getAttribute("data-yt"), +y.getAttribute("data-sec")); return; }
+      var a = e.target.closest("[data-alt]");
+      if (a) {
+        var s = SAY[+a.getAttribute("data-alt")]; stopAudio(); var my2 = ++seqId; markPlaying(a);
+        (function next(i) { if (my2 !== seqId) return; if (i >= s.seq.length) { markPlaying(null); return; } playOne(s.seq[i], lang, "F").then(function () { if (my2 === seqId) setTimeout(function () { next(i + 1); }, 450); }); })(0);
+        return;
+      }
+      var dr = e.target.closest("[data-drill]");
+      if (dr) {
+        var g = DR.groups[dr.getAttribute("data-drill")], list = dr.closest(".snd-detail");
+        playSeq(g.items.map(function (it, wi) { return { t: it.w.say || it.w.w, v: "F", el: list.querySelector("#dw" + wi), who: g.label + " · " + FL.plain(it.w.w).split(ACUTE).join("") }; }), lang);
+      }
+    } };
     function makeQs(id) {
-      var qz = QUIZ[id], qs;
+      var qz = QUIZ[id];
       if (qz.drill) {
         var pool = shuffle(DR.all.filter(function (it) { return lang === "zh" || !it.hasYo; })).slice(0, qz.n);
         var labels = DR.order.map(function (k) { return DR.groups[k].label; });
-        qs = pool.map(function (it) {
+        return pool.map(function (it) {
           var opts, after;
           if (lang === "zh") {
             var right = DR.groups[it.key].label;
@@ -1340,19 +1438,17 @@
           }
           return { lang: lang, tag: qz.h, instr: "소리를 듣고 알맞은 것을 고르십시오.", listen: { t: it.w.say || it.w.w, v: "F" }, prompt: '<div class="q-listen">' + spk(it.w.say || it.w.w, lang, "F", "big") + "</div>", opts: opts, answer: 0, after: after };
         });
-      } else {
-        qs = shuffle(qz.sets.slice()).slice(0, qz.n).map(function (st) {
-          var shown = lang === "ru" ? T(st.t, lang, hp) : esc(st.t) + " " + esc(st.py || st.o[0]);
-          return { lang: lang, tag: qz.h, instr: "소리를 듣고 알맞은 것을 고르십시오.", listen: { t: st.t, v: "F" }, prompt: '<div class="q-listen">' + spk(st.t, lang, "F", "big") + "</div>",
-            opts: qz.fixed ? qz.o.map(esc) : st.o.map(function (o) { return lang === "ru" ? esc(o).replace(/(.)́/, "<b>$1́</b>") : esc(o); }),
-            answer: qz.fixed ? st.a : 0, fixed: !!qz.fixed, after: '<div class="qa-expl"><div class="qa-full">' + shown + "</div></div>" };
-        });
       }
-      return qs;
+      return shuffle(qz.sets.slice()).slice(0, qz.n).map(function (st) {
+        var shown = lang === "ru" ? T(st.t, lang, hp) : esc(st.t) + " " + esc(st.py || st.o[0]);
+        return { lang: lang, tag: qz.h, instr: "소리를 듣고 알맞은 것을 고르십시오.", listen: { t: st.t, v: "F" }, prompt: '<div class="q-listen">' + spk(st.t, lang, "F", "big") + "</div>",
+          opts: qz.fixed ? qz.o.map(esc) : st.o.map(function (o) { return lang === "ru" ? esc(o).replace(/(.)́/, "<b>$1́</b>") : esc(o); }),
+          answer: qz.fixed ? st.a : 0, fixed: !!qz.fixed, after: '<div class="qa-expl"><div class="qa-full">' + shown + "</div></div>" };
+      });
     }
     function idle(box) {
       var qz = QUIZ[box.getAttribute("data-q")], n = qz.drill ? Math.min(qz.n, DR.all.length) : Math.min(qz.n, qz.sets.length);
-      box.innerHTML = '<div class="snd-qstart"><b>' + esc(qz.h) + '</b><span class="n">' + n + '문항</span><button type="button" class="btn sm">시작</button></div>';
+      box.innerHTML = '<div class="snd-qstart"><b>' + esc(qz.h) + '</b><span class="n">' + n + '문항</span><button type="button" class="btn sm">퀴즈 시작</button></div>';
       box.querySelector("button").onclick = function () {
         $app.querySelectorAll(".snd-quiz").forEach(function (o) { if (o !== box) idle(o); });   // 퀴즈는 한 번에 하나
         var id = box.getAttribute("data-q");
@@ -1363,6 +1459,119 @@
       };
     }
     $app.querySelectorAll(".snd-quiz").forEach(idle);
+  }
+
+  // ----- 러시아어 격 변화 정리 (#/ru/cases, data/ru/cases.js, 2026-11-27 사용자 지시) -----
+  // 탭: 한눈에 · 6격 · 내 단어 · 연습. 어미는 굵게. 예문은 듣기. 배운 Day는 cases(learn)를 따른다.
+  function ruBare(s) { return String(s).split(ACUTE).join("").toLowerCase(); }
+  function endMark(base, form) {   // 기본꼴과 같은 앞부분 뒤를 굵게(전치사·괄호는 그대로)
+    var m = String(form).match(/^((?:о|об|обо|в|на|у|к|с)\s)?([^\s(]+)(.*)$/);
+    if (!m) return esc(form);
+    var pre = m[1] || "", w = m[2], rest = m[3] || "", b = ruBare(base), toks = [], i, n = 0;
+    for (i = 0; i < w.length; i++) { if (w[i] === ACUTE && toks.length) toks[toks.length - 1] += ACUTE; else toks.push(w[i]); }
+    while (n < toks.length && n < b.length && ruBare(toks[n]) === b[n]) n++;
+    if (n >= toks.length) return esc(pre + w + rest);
+    return esc(pre) + esc(toks.slice(0, n).join("")) + "<b>" + esc(toks.slice(n).join("")) + "</b>" + esc(rest);
+  }
+  function caseLearnDay(L, i) { var d = (L.cases[i].learn || []).map(function (x) { return x.day; }); return d.length ? Math.min.apply(null, d) : null; }
+  function viewCases(lang) {
+    var L = LBY[lang], C = L.casebook, hp = L.helper.modes.length - 1;
+    var h = '<nav class="crumb"><a href="#/">처음</a> / <a href="#/' + lang + '">' + esc(L.ko) + "</a> / <span>격 변화</span></nav>";
+    if (!C) { $app.innerHTML = h + '<p class="empty">이 언어에는 격 변화 정리가 없습니다.</p>'; return; }
+    var tabs = [{ id: "all", label: "한눈에" }].concat(C.cases.map(function (c) { return { id: c.id, label: c.n }; }), [{ id: "mine", label: "내 단어" }, { id: "drill", label: "연습" }]);
+    var cur = load("fl_casetab_" + lang, "all"); if (!tabs.some(function (t) { return t.id === cur; })) cur = "all";
+    function learned(i) { var d = caseLearnDay(L, i); return d ? '<span class="cs-day">Day ' + d + "에서 배움</span>" : '<span class="cs-day later">아직 안 배움</span>'; }
+    function keyList(key) { return '<ul class="snd-key">' + key.map(function (k) { return '<li><div class="ko">' + K(k.ko, lang) + '</div><div class="en" lang="en">' + esc(k.en) + "</div></li>"; }).join("") + "</ul>"; }
+    function paneAll() {
+      var t = '<p class="sub">' + esc(C.sub) + "</p>" +
+        '<table class="cs-t cs-over"><thead><tr><th>격</th><th>묻는 말</th><th>쓰임</th><th>책상(남)</th><th>엄마(여)</th></tr></thead><tbody>' +
+        C.cases.map(function (c, i) {
+          return '<tr data-goto-tab="' + c.id + '"><td><b>' + esc(c.n) + '</b><div class="cs-sub">' + esc(c.en) + "</div>" + learned(i) + '</td><td lang="ru">' + esc(c.ask) + "</td><td>" + esc(c.short) + '</td><td lang="ru">' + endMark("стол", c.nouns[0][0]) + '</td><td lang="ru">' + endMark("ма́ма", c.nouns[5][0]) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      t += keyList([
+        { ko: "г к х ж ш ч щ 뒤에는 ы 대신 и를 씁니다(кни́ги, ру́чки).", en: "Spelling rule: и, not ы, after г к х ж ш ч щ." },
+        { ko: "ж ш ч щ ц 뒤의 강세 없는 о는 е로 씁니다(ме́сяцем, хоро́шей).", en: "Unstressed о after ж ш ч щ ц is written е." },
+        { ko: "사람·동물(살아 있는 것)인 남성 단수와 모든 복수는 대격이 생격과 같습니다.", en: "Animate masculine singular and all animate plurals: accusative = genitive." }
+      ]);
+      return t;
+    }
+    function paneCase(c, i) {
+      var t = '<div class="cs-head"><span class="cs-name">' + esc(c.n) + '</span><span lang="ru">' + esc(c.ru) + '</span><span class="cs-sub">' + esc(c.en) + ' · <span lang="ru">' + esc(c.ask) + "</span></span>" + learned(i) + "</div>" + keyList(c.key);
+      t += "<h3>명사</h3>" + '<table class="cs-t"><thead><tr><th></th><th>주격(사전형)</th><th>단수</th><th>복수</th></tr></thead><tbody>' +
+        C.nounTypes.map(function (nt, j) {
+          var nomPl = C.cases[0].nouns[j][1];
+          return '<tr><td class="cs-g">' + esc(nt.g) + '</td><td lang="ru">' + esc(nt.w) + ' <span class="cs-sub">' + esc(nt.k) + '</span></td><td lang="ru">' + endMark(nt.w, c.nouns[j][0]) + '</td><td lang="ru">' + endMark(i === 0 ? nt.w : nomPl, c.nouns[j][1]) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      if (c.id === "acc") t += '<p class="snd-note">사람·동물 남성은 생격과 같은 꼴: брат → <b lang="ru">бра́та</b>, студе́нт → <b lang="ru">студе́нта</b>. 엄마(ма́ма)의 복수 대격 мам도 생격과 같습니다.</p>';
+      t += "<h3>인칭대명사</h3>" + '<table class="cs-t cs-pron"><tbody><tr>' + C.pronouns.map(function (p) { return '<th lang="ru">' + esc(p) + "</th>"; }).join("") + "</tr><tr>" + c.pron.map(function (p) { return '<td lang="ru">' + esc(p) + "</td>"; }).join("") + "</tr></tbody></table>";
+      t += "<h3>형용사·소유대명사</h3>" + '<table class="cs-t"><thead><tr><th></th>' + C.adj.head.map(function (x) { return "<th>" + esc(x) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+        '<tr><td class="cs-g" lang="ru">' + esc(C.adj.base) + "</td>" + c.adj.map(function (x) { return '<td lang="ru">' + esc(x) + "</td>"; }).join("") + "</tr>" +
+        '<tr><td class="cs-g" lang="ru">' + esc(C.poss.base) + "</td>" + c.poss.map(function (x) { return '<td lang="ru">' + esc(x) + "</td>"; }).join("") + "</tr></tbody></table>";
+      if (c.preps.length) t += "<h3>함께 쓰는 전치사</h3>" + '<dl class="cs-preps">' + c.preps.map(function (p) { return '<div><dt lang="ru">' + esc(p[0]) + "</dt><dd>" + esc(p[1]) + "</dd></div>"; }).join("") + "</dl>";
+      t += "<h3>예문</h3>" + '<ul class="cs-ex">' + c.ex.map(function (x) { return '<li><div class="ex-t">' + T(x.t, lang) + spk(x.t, lang, "F") + repBtn(x.t, lang) + '</div><div class="ex-k">' + esc(x.k) + "</div></li>"; }).join("") + "</ul>";
+      return t;
+    }
+    function mineWords() {
+      var out = [];
+      days(lang).forEach(function (d) { d.words.forEach(function (w) { var f = L.decl && L.decl[w.w]; if (f) out.push({ w: w, day: d.day, f: f }); }); });
+      return out;
+    }
+    function paneMine() {
+      var ws = mineWords();
+      if (!ws.length) return '<p class="empty">아직 격 변화가 있는 단어를 배우지 않았습니다.</p>';
+      return '<p class="sub">Day에서 배운 명사·인칭대명사의 단수 변화입니다. 열 머리의 격 가운데 아직 안 배운 것은 흐리게 보입니다.</p><div class="tone-wrap"><table class="cs-t cs-mine"><thead><tr><th>단어</th>' +
+        C.cases.map(function (c, i) { return "<th" + (caseLearnDay(L, i) ? "" : ' class="later"') + ">" + esc(c.n) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+        ws.map(function (x) {
+          return '<tr><td><span lang="ru">' + esc(FL.plain(x.w.w)) + "</span>" + spk(x.w.say || x.w.w, lang, "F") + '<div class="cs-sub">' + esc(x.w.m) + " · D" + x.day + "</div></td>" +
+            (x.f ? x.f.map(function (v, i) { return '<td lang="ru"' + (caseLearnDay(L, i) ? "" : ' class="later"') + ">" + (i ? endMark(x.w.w, v) : esc(v)) + "</td>"; }).join("") : '<td colspan="6" class="cs-sub">형태가 바뀌지 않습니다</td>') + "</tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    function drillQs() {
+      var ws = mineWords().filter(function (x) { return x.f && !/[()]/.test(x.f.join("")) && C.pronouns.indexOf(x.w.w) < 0; });
+      var qs = [];
+      function strip(f) { return String(f).replace(/^(о|об|обо|в|на)\s/, ""); }
+      for (var tries = 0; qs.length < 10 && tries < 200; tries++) {
+        var tpl = C.drills[Math.floor(Math.random() * C.drills.length)];
+        var pool = ws.filter(function (x) { return tpl.who === "any" || (tpl.who === "person" ? C.persons : C.places).indexOf(x.w.w) >= 0; });
+        if (!pool.length) continue;
+        var x = pool[Math.floor(Math.random() * pool.length)];
+        var forms = x.f.map(strip), right = forms[tpl.c], pre = "";
+        if (tpl.withPrep) pre = tpl.about ? (/^[аоуэиАОУЭИ]/.test(right) ? "об " : "о ") : (x.f[5].match(/^(в|на)\s/) || ["", ""])[0];
+        var opts = [right];
+        shuffle(forms.slice()).forEach(function (f) { if (opts.length < 4 && opts.indexOf(f) < 0) opts.push(f); });
+        if (opts.length < 2) continue;
+        var sent = tpl.q.replace("___", pre + right), cs = C.cases[tpl.c];
+        qs.push({ lang: lang, tag: "격 변화", instr: "빈칸에 알맞은 꼴을 고르십시오. (" + tpl.k + ")", fixed: false,
+          prompt: '<div class="q-sent" lang="ru">' + esc(tpl.q.replace("___", pre + "（　）")) + '</div><div class="cs-sub">' + esc(FL.plain(x.w.w)) + " · " + esc(x.w.m) + "</div>",
+          opts: opts.map(function (o) { return '<span lang="ru">' + esc(pre + o) + "</span>"; }), answer: 0,
+          after: '<div class="qa-expl"><div class="qa-full">' + T(sent, lang, hp) + '</div><p class="expl">' + esc(cs.n) + " (" + esc(cs.short) + ") — " + esc(tpl.k) + "</p></div>" });
+      }
+      return qs;
+    }
+    h += '<article class="sound casepage"><h1>' + esc(C.title) + "</h1>" +
+      '<nav class="snd-tabs" role="tablist">' + tabs.map(function (t) { return '<button type="button" role="tab" data-ctab="' + t.id + '"' + (t.id === cur ? ' aria-selected="true"' : "") + ">" + esc(t.label) + "</button>"; }).join("") + "</nav>";
+    tabs.forEach(function (t) {
+      var body = t.id === "all" ? paneAll() : t.id === "mine" ? paneMine() : t.id === "drill" ? '<p class="sub">배운 단어로 빈칸 문제를 만듭니다. 문장마다 어느 격이 필요한지 생각하며 고르십시오.</p><div class="cs-quiz"></div>' : paneCase(C.cases.filter(function (c) { return c.id === t.id; })[0], C.cases.findIndex(function (c) { return c.id === t.id; }));
+      h += '<section class="snd-pane" data-pane="' + t.id + '"' + (t.id === cur ? "" : " hidden") + ">" + body + "</section>";
+    });
+    h += "</article>";
+    $app.innerHTML = h;
+    applyHelper(lang, $app);
+    function startDrill() {
+      var box = $app.querySelector(".cs-quiz");
+      box.innerHTML = '<div class="snd-qstart"><b>격 변화 빈칸 고르기</b><span class="n">10문항</span><button type="button" class="btn sm">시작</button></div>';
+      box.querySelector("button").onclick = function () { runQuiz(box, drillQs(), { make: drillQs }); };
+    }
+    function show(id) {
+      cur = id; save("fl_casetab_" + lang, id); stopAudio(); QZ = null;
+      $app.querySelectorAll("[data-ctab]").forEach(function (x) { if (x.getAttribute("data-ctab") === id) x.setAttribute("aria-selected", "true"); else x.removeAttribute("aria-selected"); });
+      $app.querySelectorAll(".snd-pane").forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== id; });
+      if (id === "drill") startDrill();
+      var bar = $app.querySelector(".snd-tabs"); if (window.scrollY > bar.offsetTop) window.scrollTo(0, Math.max(0, bar.offsetTop - stickBottom()));
+    }
+    $app.querySelectorAll("[data-ctab]").forEach(function (b) { b.onclick = function () { show(b.getAttribute("data-ctab")); }; });
+    $app.querySelectorAll("[data-goto-tab]").forEach(function (r) { r.onclick = function () { show(r.getAttribute("data-goto-tab")); }; });
+    if (cur === "drill") startDrill();
   }
 
   // ----- 5일 리포트 (종합 점검 결과 정리 + 다음 5일 계획, data/<lang>/rNN.js) -----
